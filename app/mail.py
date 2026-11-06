@@ -26,7 +26,11 @@ log = logging.getLogger("mail")
 
 EVENTS = (
     "high_job",
+    "after_send_review",
     "invite",
+    "invite_reminder",
+    "jss_drop",
+    "rank_drop",
     "message",
     "connects_low",
     "auth_expired",
@@ -398,6 +402,76 @@ def notify_run_failed(
         "run_failed",
         run_id,
         f"The {task} run failed {failures} times in a row",
+        text,
+        html,
+        config=config,
+        **kw,
+    )
+
+
+def notify_invite(
+    conn, config: Config, invite: dict[str, Any], *, reminder: bool = False, hours: float = 0, **kw
+) -> str:
+    """New invitation (event `invite`), or the one reminder (event `invite_reminder`) when it is
+    still not answered after `hours`. `invite` has id, job_id, title."""
+    title = _clean(invite.get("title") or "") or "an invitation"
+    job_id = str(invite.get("job_id") or "")
+    links = [("Open the job on Upwork", f"https://www.upwork.com/jobs/~02{job_id}")]
+    if not job_id.isdigit():
+        links = []
+    if reminder:
+        heading = "An invitation is still waiting for your answer"
+        line = f"It has waited more than {hours:g} hours. Answer fast: ignored invites hurt rank."
+        event = "invite_reminder"
+    else:
+        heading = "New invitation"
+        line = "Answer within a few hours. Ignored invites hurt rank."
+        event = "invite"
+    text, html = build_email(
+        heading,
+        [line],
+        items=[{"title": title, "meta": "Invitation to a job", "links": links}],
+        link_path="/",
+        base_url=config.public_base_url,
+    )
+    return send_event(
+        conn, event, str(invite["id"]), f"{heading}: {title}"[:150], text, html, config=config, **kw
+    )
+
+
+def notify_jss_drop(conn, config: Config, day: str, before: float, after: float, **kw) -> str:
+    text, html = build_email(
+        "Your Job Success Score dropped",
+        [
+            f"It was {before:g}% and is now {after:g}%.",
+            "The JSS guard is ON: profile tests are stopped until you clear it.",
+        ],
+        link_path="/",
+        base_url=config.public_base_url,
+    )
+    return send_event(
+        conn, "jss_drop", day, "Your Job Success Score dropped", text, html, config=config, **kw
+    )
+
+
+def notify_rank_drop(
+    conn, config: Config, keyword: str, week: str, before: float, after: float, days: int, **kw
+) -> str:
+    keyword = _clean(keyword)
+    text, html = build_email(
+        f"Search rank dropped for {keyword}",
+        [
+            f"Your 7-day average place went from #{before:.1f} to #{after:.1f}.",
+            f"It has been worse than the week before on {days} days in a row.",
+        ],
+        link_path="/",
+        base_url=config.public_base_url,
+    )
+    return send_event(
+        conn,
+        "rank_drop",
+        f"{keyword}|{week}",
+        f"Search rank dropped: {keyword}"[:150],
         text,
         html,
         config=config,

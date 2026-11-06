@@ -353,6 +353,58 @@ def test_run_row_counts_calls_and_limit_stops_the_rest(
     assert again[0].error_kind == "budget" and len(fake_claude_stream.logs()) == 2
 
 
+def test_call_budget_is_separate_and_the_run_total_stays_right(
+    config, settings, conn, fake_claude_stream, tmp_path, monkeypatch
+):
+    write_rules(tmp_path, [reply("list_accounts", {"ok": 1})], monkeypatch)
+    conn.execute(
+        "INSERT INTO runs(run_id, task, started, status) VALUES ('r1','daily','x','running')"
+    )
+    settings.set("upwork.max_mcp_calls_per_run", 4)
+    settings.set("rank.max_mcp_calls", 3)
+    b = ClaudeUpworkBridge(config, settings, conn, "r1")
+    assert settings.get("rank.max_mcp_calls") == 3
+    with b.call_budget("rank.max_mcp_calls"):
+        res = b.call_many([("list_accounts", {})] * 5)
+        assert [r.is_error for r in res] == [False] * 3 + [True] * 2
+        assert [r.error_kind for r in res[3:]] == ["budget", "budget"]
+    # the shared budget of 4 is untouched by the 3 scoped calls ...
+    res = b.call_many([("list_accounts", {})] * 5)
+    assert [r.is_error for r in res] == [False] * 4 + [True]
+    # ... and the run total counts all of them
+    assert conn.execute("SELECT mcp_calls FROM runs").fetchone()[0] == 3 + 4
+
+
+def test_call_budget_ends_with_the_block_and_nests_safely(
+    config, settings, conn, fake_claude_stream, tmp_path, monkeypatch
+):
+    write_rules(tmp_path, [reply("list_accounts", {"ok": 1})], monkeypatch)
+    settings.set("rank.max_mcp_calls", 1)
+    b = ClaudeUpworkBridge(config, settings, conn)
+    with pytest.raises(RuntimeError):
+        with b.call_budget("rank.max_mcp_calls"):
+            raise RuntimeError("inside")
+    assert b._scope is None  # left cleanly even after an error
+    assert not b.call_many([("list_accounts", {})])[0].is_error
+    with pytest.raises(KeyError):
+        with b.call_budget("rank.no_such_setting"):
+            pass
+
+
+def test_shared_limit_ignores_calls_made_in_a_scope(
+    config, settings, conn, fake_claude_stream, tmp_path, monkeypatch
+):
+    """Rank ran first and used 3 calls of its own: the jobs part still has its full 2."""
+    write_rules(tmp_path, [reply("list_accounts", {"ok": 1})], monkeypatch)
+    settings.set("upwork.max_mcp_calls_per_run", 2)
+    settings.set("rank.max_mcp_calls", 3)
+    b = ClaudeUpworkBridge(config, settings, conn)  # no run row: counted in the object
+    with b.call_budget("rank.max_mcp_calls"):
+        assert not any(r.is_error for r in b.call_many([("list_accounts", {})] * 3))
+    res = b.call_many([("list_accounts", {})] * 3)
+    assert [r.is_error for r in res] == [False, False, True]
+
+
 # ---------- last fetch ----------
 
 

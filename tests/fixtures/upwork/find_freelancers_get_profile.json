@@ -1,0 +1,14 @@
+{
+  "_note": "SHAPE GUESSED, NOT CAPTURED. Written by hand for tests (plan X1). The real answer of find_freelancers action=get_profile has not been seen live yet. It is assumed to carry the same fields as one search result plus job_success_score.",
+  "freelancer": {
+    "person_id": "1000000000000000000",
+    "profile_key": "~01sample",
+    "name": "Sample F.",
+    "job_success_score": 96,
+    "top_rated": "Top Rated",
+    "hourly_rate": "$35.0",
+    "skills": ["n8n", "Python"],
+    "profile_url": "https://www.upwork.com/freelancers/~01sample"
+  },
+  "status": "ok"
+}

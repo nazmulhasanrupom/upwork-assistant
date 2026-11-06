@@ -15,4 +15,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
-markers = ["judging: run the real judge/write step of the daily task (with a fake claude)"]
+markers = [
+  "judging: run the real judge/write step of the daily task (with a fake claude)",
+  "after_send: run the real after-send proposal review of the daily task (with fakes)",
+  "metrics: run the real daily metrics snapshot of the daily task (with a fake bridge)",
+  "rank: run the real daily keyword rank check of the daily task (with a fake bridge)",
+]

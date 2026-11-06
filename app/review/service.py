@@ -48,6 +48,13 @@ MSG_BAD_OUTPUT = (
 )
 
 
+# `error_kind` in a saved review that has no score. no_user, cap and rate_limit are temporary:
+# the after-send task does not count them as a review and tries again in a later run.
+ERR_NO_USER, ERR_CAP, ERR_RATE_LIMIT = "no_user", "cap", "rate_limit"
+ERR_FAILED, ERR_BAD_OUTPUT = "failed", "bad_output"
+TEMPORARY_ERRORS = (ERR_NO_USER, ERR_CAP, ERR_RATE_LIMIT)
+
+
 class ReviewError(RuntimeError):
     """The model's answer cannot be used."""
 
@@ -284,8 +291,14 @@ def run_review(
     cover_letter: str,
     answers: list[dict[str, str]],
     rate: str,
+    claude_answers: list[dict[str, str]] | None = None,
+    run_id: str | None = None,
 ) -> int:
     """Pre-checks, then one writing-model call. Saves and returns the review id.
+
+    `claude_answers` replaces `answers` in the draft block that goes to Claude (the after-send
+    review keeps the questions, which are Upwork text, inside the untrusted job tags instead).
+    `run_id` is the `runs` row the Claude cost is recorded under.
 
     Cap reached, rate limit, a missing USER.md or a bad answer do not raise: the review is saved
     with the pre-checks and an `error` text, so the page still shows what Python found.
@@ -314,19 +327,24 @@ def run_review(
     }
     model = str(settings.get("models.write"))
 
-    def failed(message: str) -> int:
+    def failed(message: str, kind: str) -> int:
         return save_review(
-            conn, **common, result={"error": message}, score=None, model=None, cost=0.0
+            conn,
+            **common,
+            result={"error": message, "error_kind": kind},
+            score=None,
+            model=None,
+            cost=0.0,
         )
 
     user_facts = prompting.user_facts(config)
     if not user_facts:
-        return failed(MSG_NO_USER)
+        return failed(MSG_NO_USER, ERR_NO_USER)
 
     job_payload = json.loads(_neutral(json.dumps(job["input"], ensure_ascii=False)))
     input_obj = {
         "job": job_payload,
-        "draft": draft_block(cover_letter, answers, rate),
+        "draft": draft_block(cover_letter, claude_answers or answers, rate),
         "prechecks": [{k: f[k] for k in ("check", "severity", "message")} for f in findings],
     }
     try:
@@ -343,14 +361,15 @@ def run_review(
             effort=settings.get("models.write_effort") or None,
             timeout=int(settings.get("review.timeout_seconds")),
             prompt_text=prompting.build_prompt(PROMPT, config=config),
+            record_run_id=run_id,
         )
     except BudgetCapReached as e:
-        return failed(f"{e} The checks below ran without Claude.")
+        return failed(f"{e} The checks below ran without Claude.", ERR_CAP)
     except ClaudeRateLimited:
-        return failed(MSG_RATE_LIMIT)
+        return failed(MSG_RATE_LIMIT, ERR_RATE_LIMIT)
     except ClaudeFailed as e:
         log.warning("review call failed: %s", e)
-        return failed(f"Claude could not finish the review: {str(e)[:200]}")
+        return failed(f"Claude could not finish the review: {str(e)[:200]}", ERR_FAILED)
 
     sources = "\n".join(
         [
@@ -372,7 +391,7 @@ def run_review(
         return save_review(
             conn,
             **common,
-            result={"error": MSG_BAD_OUTPUT},
+            result={"error": MSG_BAD_OUTPUT, "error_kind": ERR_BAD_OUTPUT},
             score=None,
             model=model,
             cost=float(res["cost_usd"]),

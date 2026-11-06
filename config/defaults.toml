@@ -44,6 +44,9 @@ jobs_page_size = 50             # cards per page on /jobs
 runs_page_size = 25             # rows per page on /runs
 log_match_minutes = 10          # a run's log file starts at most this long before the run row
 log_view_max_kb = 256           # the log viewer shows at most the last part of a file this big
+hide_unaffordable = false       # /jobs hides jobs that cost more Connects than the latest balance
+funnel_weeks = 8                # weeks shown in the dashboard funnel chart
+rank_chart_days = 30            # days shown in each keyword rank chart
 
 [memory]                  # SPEC2 5.1, plan J2a
 total_cap_chars = 3500          # MEMORY.md + USER.md together; over this the page warns
@@ -65,6 +68,33 @@ job_list_limit = 60             # recent jobs offered in the job picker
 history_limit = 30              # past reviews listed on /review
 score_good = 80                 # score badge: this or more is green
 score_ok = 60                   # score badge: this or more is yellow, below is red
+after_send_enabled = true       # daily run syncs my sent proposals and reviews each new one once (plan R3)
+after_send_max_age_days = 90    # older proposals are stored but never reviewed
+after_send_list_limit = 25      # proposals asked for in the one `list` call (Upwork max is 25)
+after_send_max_per_run = 5      # Claude reviews per daily run; the rest wait for the next run
+after_send_page_limit = 50      # proposals shown on /review
+
+[metrics]                 # SPEC2 4.C phase 1, plan X1 (daily metrics snapshot)
+enabled = true                  # the daily run stores one metrics row per local day
+jss_enabled = true              # also try to read my Job Success Score (find_freelancers get_profile)
+profile_key = ""                # my profile key (~...), learned from get_profile on the first run
+funnel_days = 7                 # proposals sent in the last N days count in the funnel
+interview_statuses = ["Offered", "Activated"]   # proposal statuses that count as an interview
+hire_statuses = ["Hired"]       # proposal statuses that count as a hire
+invite_memory_days = 30         # invitation ids seen in this many past days are not "new" again
+average_days = 7                # window of the average helper (used by rank and alerts later)
+card_days = 7                   # the dashboard "This week" card sums invites over this many days
+profile_views_max = 1000000     # biggest number the profile views box accepts
+
+[rank]                    # SPEC2 4.C, plan X2 (keyword rank, one check per local day)
+enabled = true                  # the daily run checks the rank once a day
+run_hour_local = 6              # first daily run at or after this local hour does the check
+page_size = 25                  # freelancers per find_freelancers page (Upwork max 25)
+max_pages = 4                   # pages looked at per keyword; not found after that = NULL
+max_keywords = 20               # at most this many keywords are checked
+average_days = 7                # window of the average on the dashboard
+max_mcp_calls = 32              # rank's own MCP call budget per run (counted apart from upwork.max_mcp_calls_per_run)
+keywords = ["n8n automation", "AI automation", "AI agent developer", "Make.com", "Zapier", "RAG chatbot", "Python automation", "workflow automation"]   # seed list; Phase KW replaces it with the approved ones
 
 [schedules]               # SPEC 9, cron in the configured time zone
 daily = "0 */2 * * *"
@@ -136,6 +166,27 @@ run_failed_threshold = 3        # SPEC 11: email after this many failed runs in 
 connects_low_min_hours = 24     # max one low-Connects email per this many hours
 auth_expired_min_hours = 24     # same for "Upwork login expired"
 run_failed_min_hours = 24       # same for "run failed 3 times"
+invites_enabled = true          # plan X3: email for a new invite, and once more when it is not answered
+invite_reminder_hours = 12      # an invite still waiting after this many hours gets one more email
+jss_drop_enabled = true         # email + JSS guard when my Job Success Score drops
+jss_drop_points = 1             # a drop of at least this many points counts
+rank_drop_enabled = true        # email when a keyword's rank gets worse for several days in a row
+rank_drop_positions = 3         # the average place must be worse by at least this many places ...
+rank_drop_days = 3              # ... on this many days in a row (7-day average vs the 7 days before)
+
+[writes]                  # plan H1: the write path (app/upwork/writes.py). Preview and confirm need a user click.
+preview_max_age_minutes = 25    # a preview older than this must be made again (Upwork keeps it about 30, to be measured)
+click_max_age_seconds = 600     # a user click proves one write only if it is this fresh
+max_turns = 4                   # one tool call per write run, a few turns for ToolSearch and the answer
+max_budget_usd = 0.25           # cap for one write run
+timeout_seconds = 300
+cover_letter_max_chars = 5000   # Upwork limit; longer is refused, never cut
+require_asked_flags = true      # confirm needs "asked about attachments" and "asked about highlights" (Upwork rule)
+existing_check_limit = 25       # proposals read when checking for an existing proposal (max 25)
+
+[safety]                  # plan HR1/X3: switches the agent may set but never clear
+jss_guard = false               # set when the JSS drops; stops Phase O profile tests. Only the owner clears it.
+jss_guard_note = ""             # why and when the guard was set
 
 [email]                   # SPEC 11, plan M. Gmail is used when connected, else SMTP when smtp_host is set.
 smtp_host = ""            # optional fallback for people without Gmail
@@ -163,7 +214,11 @@ digest_max_jobs = 15            # jobs listed in the digest email, best fit firs
 
 [email.events]            # one switch per email (SPEC 11); all on by default
 high_job = true
-invite = true
+after_send_review = true
+invite = true                   # new invite, right away
+invite_reminder = true          # the same invite is still not answered (alerts.invite_reminder_hours)
+jss_drop = true
+rank_drop = true
 message = true
 connects_low = true
 auth_expired = true

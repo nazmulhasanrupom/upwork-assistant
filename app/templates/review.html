@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card %}
+{% from "_macros.html" import button, flash, card, pill %}
 {% block title %}Review a proposal{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -47,6 +47,30 @@
   {% endcall %}
   <div class="actions">{{ button("Review my proposal", "primary") }}</div>
 </form>
+
+{% call card("Proposals you sent") %}
+  <p class="muted small">The daily run reads your sent proposals from Upwork and reviews each new one once. Nothing is changed on Upwork.</p>
+  {% if proposals %}
+  <div class="table-wrap">
+  <table class="table" id="sent-proposals">
+    <thead><tr><th scope="col">Sent</th><th scope="col">Job</th><th scope="col" class="num">Rate</th><th scope="col">Status</th><th scope="col" class="num">After-send score</th><th scope="col">Draft vs sent</th><th scope="col"></th></tr></thead>
+    <tbody>
+    {% for p in proposals %}
+    <tr>
+      <td>{% if p.created_at %}{{ p.created_at | dt }}{% else %}<span class="muted">unknown</span>{% endif %}</td>
+      <td>{{ p.title }}{% if p.boosted %} {{ pill("Boosted", "") }}{% endif %}</td>
+      <td class="num">{% if p.rate is not none %}${{ "%g"|format(p.rate) }}{% else %}<span class="muted">-</span>{% endif %}</td>
+      <td>{{ p.status or "-" }}{% if p.viewed %} {{ pill("Viewed", "ok") }}{% endif %}</td>
+      <td class="num">{% if p.score is not none %}<span class="score-badge {{ p.score_class }}">{{ p.score }}</span>{% elif p.error %}<span class="muted">not scored</span>{% elif not p.text_stored %}<span class="muted">text not read yet</span>{% else %}<span class="muted">waiting</span>{% endif %}</td>
+      <td>{% if p.has_draft %}{% if p.draft_changed %}{{ p.similarity }}% the same{% else %}sent as written{% endif %}{% else %}<span class="muted">no draft</span>{% endif %}</td>
+      <td>{% if p.review_id %}<a href="/review/{{ p.review_id }}">Open review</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="muted" id="sent-proposals">No sent proposals yet. They appear after the next daily run.</p>{% endif %}
+{% endcall %}
 
 {% call card("Past reviews") %}
   {% if history %}

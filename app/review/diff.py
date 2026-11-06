@@ -46,3 +46,32 @@ def word_diff(original: str, fixed: str) -> tuple[Markup, Markup]:
         if j2 > j1:
             right.append(("ins", "".join(b[j1:j2])))
     return _join(left), _join(right)
+
+
+def compare(draft: str, sent: str) -> dict[str, object]:
+    """Plain data about how a sent text differs from the draft (stored as JSON, plan R3).
+
+    `ops` is a list of [kind, text] with kind equal, del (in the draft only) or ins (in the sent
+    text only). `similarity` is 0 to 1. Word counts ignore spaces.
+    """
+    a, b = _tokens(draft), _tokens(sent)
+    matcher = SequenceMatcher(None, a, b, autojunk=False)
+    ops: list[list[str]] = []
+    added = removed = 0
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if op == "equal":
+            ops.append(["equal", "".join(a[i1:i2])])
+            continue
+        if i2 > i1:
+            ops.append(["del", "".join(a[i1:i2])])
+            removed += sum(1 for t in a[i1:i2] if not t.isspace())
+        if j2 > j1:
+            ops.append(["ins", "".join(b[j1:j2])])
+            added += sum(1 for t in b[j1:j2] if not t.isspace())
+    return {
+        "similarity": round(matcher.ratio(), 3),
+        "added_words": added,
+        "removed_words": removed,
+        "changed": draft.strip() != sent.strip(),
+        "ops": ops,
+    }

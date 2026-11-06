@@ -13,10 +13,13 @@ from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
+from app import charts
 from app import costs as cost_totals
+from app import metrics as metrics_data
+from app import rank as rank_data
 from app.auth_routes import render
 from app.llm import prompting
 from app.tasks import lock, trigger
@@ -28,6 +31,7 @@ TIERS = ("HIGH", "MID", "LOW")
 STATUSES = ("candidate", "judged", "drafted", "prepared", "sent", "skipped", "dropped", "seen")
 STATUS_ACTIVE = ""  # default: everything except dropped jobs
 STATUS_ALL = "all"
+AFFORD_CHOICES = ("show", "hide")
 UPWORK_PREFIX = "https://www.upwork.com/"
 TASKS = trigger.TASKS  # shown on the dashboard even if never run
 
@@ -216,7 +220,48 @@ def dashboard_data(
         "counts": counts,
         "today": today.isoformat(),
         "costs": costs,
+        "metrics": (
+            metrics_data.dashboard_summary(conn, settings, tz, now)
+            if settings is not None
+            else None
+        ),
+        "rank": (
+            rank_data.dashboard_summary(conn, settings, tz, now) if settings is not None else None
+        ),
+        "charts": chart_data(conn, settings, tz, now) if settings is not None else None,
+        "jss_guard": (
+            {
+                "on": bool(settings.get("safety.jss_guard")),
+                "note": settings.get("safety.jss_guard_note"),
+            }
+            if settings is not None
+            else None
+        ),
     }
+
+
+def chart_data(conn: sqlite3.Connection, settings: Any, tz: tzinfo, now: datetime) -> dict:
+    """The funnel chart and one rank chart per keyword (plan X3). SVG is built in app/charts.py."""
+    funnel = charts.funnel_data(conn, settings, tz, now)
+    keywords = rank_data.approved_keywords(conn, settings) if settings.get("rank.enabled") else []
+    ranks = []
+    for entry in charts.rank_data(conn, settings, tz, now, keywords):
+        ranks.append({**entry, "svg": charts.rank_svg(entry), "latest": _latest_point(entry)})
+    return {
+        "funnel": funnel,
+        "funnel_svg": charts.funnel_svg(funnel),
+        "ranks": ranks,
+        "funnel_weeks": len(funnel["weeks"]),
+        "rank_days": ranks[0]["days"] if ranks else int(settings.get("ui.rank_chart_days")),
+    }
+
+
+def _latest_point(entry: dict) -> str:
+    points = entry["points"]
+    if not points:
+        return ""
+    last = points[-1]
+    return f"#{last['position']}" if last["position"] is not None else "not found"
 
 
 EMAIL_ALERTS = {"gmail_expired", "email_failed"}  # their message points to the Email page
@@ -227,6 +272,9 @@ RUN_MESSAGES = {
     "busy": ("warn", "That task is already running."),
     "unbuilt": ("warn", "That task is not built yet."),
     "killed": ("error", "The kill switch is on, so nothing was started."),
+    "views_saved": ("ok", "Profile views saved for this week."),
+    "guard_cleared": ("ok", "The JSS guard is off. Profile tests may run again."),
+    "views_bad": ("error", "Profile views must be a whole number, 0 or more."),
 }
 
 
@@ -287,6 +335,30 @@ def run_task(request: Request, name: str) -> Response:
     return RedirectResponse(f"/?msg={outcome}", status_code=303)
 
 
+@router.post("/safety/jss-guard/clear")
+def clear_jss_guard(request: Request) -> Response:
+    """The owner clears the JSS guard by hand (nothing in the code ever does). Login + CSRF are
+    checked by the app-wide guard."""
+    s = request.app.state.settings
+    s.set("safety.jss_guard", False)
+    return RedirectResponse("/?msg=guard_cleared", status_code=303)
+
+
+@router.post("/metrics/profile-views")
+def save_profile_views(request: Request, views: str = Form("")) -> Response:
+    """Save this week's profile views (typed by hand, Upwork gives no number). Login + CSRF are
+    checked by the app-wide guard."""
+    s = request.app.state
+    try:
+        number = int(views.strip())
+        metrics_data.save_profile_views(
+            s.db, s.settings, number, datetime.now(UTC), tz=_tz(request)
+        )
+    except ValueError:
+        return RedirectResponse("/?msg=views_bad", status_code=303)
+    return RedirectResponse("/?msg=views_saved", status_code=303)
+
+
 # ---------------------------------------------------------------- jobs list
 
 
@@ -297,6 +369,7 @@ def jobs_list(
     status: str = "",
     date_from: str = "",
     date_to: str = "",
+    afford: str = "",
     page: int = 1,
 ) -> Response:
     conn: sqlite3.Connection = request.app.state.db
@@ -320,6 +393,17 @@ def jobs_list(
     if day_to:
         where.append("j.first_seen < ?")
         args.append(_local_day_start_utc(day_to + timedelta(days=1), tz))
+    # Jobs that cost more Connects than the latest balance (plan X3). `afford` is "show", "hide"
+    # or "" (= the setting ui.hide_unaffordable).
+    afford = afford if afford in AFFORD_CHOICES else ""
+    hide = afford == "hide" or (
+        afford == "" and bool(request.app.state.settings.get("ui.hide_unaffordable"))
+    )
+    latest = conn.execute("SELECT balance FROM connects ORDER BY id DESC LIMIT 1").fetchone()
+    balance = latest["balance"] if latest else None
+    if hide and balance is not None:
+        where.append("(j.connects_cost IS NULL OR j.connects_cost <= ?)")
+        args.append(balance)
     clause = ("WHERE " + " AND ".join(where)) if where else ""
 
     size = max(1, int(request.app.state.settings.get("ui.jobs_page_size")))
@@ -336,16 +420,27 @@ def jobs_list(
     cards = []
     for r in rows:
         plan = _json(r["plan_json"], {})
+        # Python decides from the latest balance; the judgement's answer (older) is the fallback
+        can_afford = plan.get("can_afford") if isinstance(plan, dict) else None
+        if balance is not None and r["connects_cost"] is not None:
+            can_afford = r["connects_cost"] <= balance
         cards.append(
             {
                 **dict(r),
                 "flags": _json(r["red_flags"], []),
-                "can_afford": plan.get("can_afford") if isinstance(plan, dict) else None,
+                "can_afford": can_afford,
+                "connects_balance": balance,
             }
         )
 
     def page_url(n: int) -> str:
-        q = {"tier": tier, "status": status, "date_from": date_from, "date_to": date_to}
+        q = {
+            "tier": tier,
+            "status": status,
+            "date_from": date_from,
+            "date_to": date_to,
+            "afford": afford,
+        }
         q = {k: v for k, v in q.items() if v}
         q["page"] = str(n)
         return "/jobs?" + urlencode(q)
@@ -365,6 +460,9 @@ def jobs_list(
         f_status=status,
         f_from=day_from.isoformat() if day_from else "",
         f_to=day_to.isoformat() if day_to else "",
+        f_afford=afford,
+        hide_default=bool(request.app.state.settings.get("ui.hide_unaffordable")),
+        balance=balance,
     )
 
 

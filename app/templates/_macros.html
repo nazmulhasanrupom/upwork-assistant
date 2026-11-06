@@ -60,6 +60,7 @@
     <div class="card-head">
       {% if j.tier %}{{ badge(j.tier, j.tier_estimated) }}{% endif %}
       {{ pill(j.status, "status-pill") }}
+      {% if j.can_afford is false %}<span class="pill warn cant-afford"{% if j.connects_cost is not none and j.connects_balance is not none %} title="Costs {{ j.connects_cost }} Connects, you have {{ j.connects_balance }}"{% endif %}>Can't afford</span>{% endif %}
     </div>
     <h3 class="card-job-title"><a href="/jobs/{{ j.job_id }}">{{ j.title or j.job_id }}</a></h3>
     <dl class="facts-grid">
@@ -68,7 +69,7 @@
       <div><dt>Hires</dt><dd>{{ j.client_hires if j.client_hires is not none else "n/a" }}</dd></div>
       <div><dt>Rating</dt><dd>{{ j.client_rating if j.client_rating is not none else "n/a" }}</dd></div>
     </dl>
-    {% if j.fit_score is not none %}<p class="fit"><strong>Fit {{ j.fit_score }}</strong>{% if j.has_draft %} {{ pill("Draft ready", "ok") }}{% endif %}{% if j.can_afford is false %} {{ pill("Can't afford", "warn") }}{% endif %}{% if j.why_apply %}<br><span class="muted">{{ j.why_apply.splitlines() | join("; ") }}</span>{% endif %}</p>{% endif %}
+    {% if j.fit_score is not none %}<p class="fit"><strong>Fit {{ j.fit_score }}</strong>{% if j.has_draft %} {{ pill("Draft ready", "ok") }}{% endif %}{% if j.why_apply %}<br><span class="muted">{{ j.why_apply.splitlines() | join("; ") }}</span>{% endif %}</p>{% endif %}
     {% if j.drop_reason %}<p class="muted small">Dropped: {{ j.drop_reason }}</p>{% endif %}
     {{ chips(j.flags) }}
     <p class="card-foot muted small">First seen <time>{{ j.first_seen | dt }}</time></p>

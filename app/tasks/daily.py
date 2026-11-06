@@ -15,18 +15,21 @@ import sqlite3
 import sys
 import uuid
 from collections import Counter
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from app import mail, notes
+from app import alerts, mail, metrics, notes, rank
 from app.config import Config, load_config
 from app.db import init_db
 from app.filters.flags import flags as red_flags
 from app.filters.tiers import prefilter, tier
 from app.llm import judging
 from app.llm.judging import JudgeResult
+from app.llm.runner import BudgetCapReached, ClaudeRateLimited
+from app.review import after_send
 from app.settings import Settings
 from app.tasks.lock import TaskBusy, task_lock
 from app.upwork import accounts
@@ -175,6 +178,9 @@ def _note_block(
     top_n: int,
     balance: int | None,
     oddities: list[str],
+    proposals: list[str] | None = None,
+    metric_lines: list[str] | None = None,
+    rank_lines: list[str] | None = None,
 ) -> str:
     tiers = ", ".join(f"{k} {v}" for k, v in sorted(result.tiers.items())) or "none"
     top = ", ".join(f"{s} ({n})" for s, n in skills.most_common(top_n)) or "none"
@@ -188,6 +194,15 @@ def _note_block(
     ]
     if balance is not None:
         lines.append(f"- Connects balance: {balance}")
+    if proposals:
+        lines.append("- Sent proposals:")
+        lines.extend(f"  - {p}" for p in proposals)
+    if metric_lines:
+        lines.append("- Metrics:")
+        lines.extend(f"  - {m}" for m in metric_lines)
+    if rank_lines:
+        lines.append("- Keyword rank:")
+        lines.extend(f"  - {r}" for r in rank_lines)
     if oddities:
         lines.append("- Oddities:")
         lines.extend(f"  - {o}" for o in oddities)
@@ -197,6 +212,153 @@ def _note_block(
 def write_note(config: Config, now_local: datetime, block: str) -> None:
     """Append to memory/daily/YYYY-MM-DD.md (old notes/daily files are only read, see notes.py)."""
     notes.append_note(config, now_local.strftime("%Y-%m-%d"), block)
+
+
+# ---------------------------------------------------------------- after-send review (plan R3)
+
+
+def after_send_part(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    config: Config,
+    client: Any,
+    run_id: str,
+    now: datetime,
+) -> list[str]:
+    """Sync my sent proposals and review the new ones. Returns lines for the daily note.
+
+    Never raises: an error here is logged and shown as an alert, and the daily run stays ok."""
+    if not settings.get("review.after_send_enabled"):
+        return []
+    try:
+        res = after_send.run_after_send(client, conn, config, settings, run_id=run_id, now=now)
+    except Exception as e:
+        log.exception("After-send review failed")
+        message = f"The after-send proposal review failed: {type(e).__name__}: {e}"[:300]
+        conn.execute(
+            "INSERT INTO alerts(key, message, created_at) VALUES (?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET message = excluded.message",
+            (after_send.ALERT_KEY, message, _iso(now)),
+        )
+        return [message]
+    conn.execute("DELETE FROM alerts WHERE key = ?", (after_send.ALERT_KEY,))
+    return res.lines()
+
+
+# ---------------------------------------------------------------- metrics snapshot (plan X1)
+
+
+def metrics_part(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    config: Config,
+    client: Any,
+    now: datetime,
+    out: dict[str, Any] | None = None,
+) -> list[str]:
+    """Store today's metrics row. Returns lines for the daily note. The row (with the pending
+    invitations just read) is also put in `out["row"]` for the alerts step.
+
+    Never raises: an error is logged and shown as the alert `metrics_failed`, the daily run
+    stays ok. The bridge applies the Claude cap and the rate-limit stop; if they stop the
+    snapshot it is skipped quietly (a note) and tried again at the next run."""
+    if not settings.get("metrics.enabled"):
+        return []
+    try:
+        row = metrics.snapshot(client, conn, settings, now, tz=_zone(config.tz))
+    except (BudgetCapReached, ClaudeRateLimited) as e:
+        return [f"Metrics not stored (Claude limit): {e}"[:300]]
+    except Exception as e:
+        log.exception("Metrics snapshot failed")
+        message = f"The daily metrics snapshot failed: {type(e).__name__}: {e}"[:300]
+        conn.execute(
+            "INSERT INTO alerts(key, message, created_at) VALUES (?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET message = excluded.message",
+            (metrics.ALERT_KEY, message, _iso(now)),
+        )
+        return [message]
+    conn.execute("DELETE FROM alerts WHERE key = ?", (metrics.ALERT_KEY,))
+    if out is not None:
+        out["row"] = row
+    jss = "unknown" if row["jss"] is None else f"{row['jss']:g}"
+    return [
+        f"Metrics {row['date']}: Connects {row['connects']}, JSS {jss}, "
+        f"invites {row['invites_open']} open / {row['invites_new']} new, "
+        f"proposals {row['proposals_sent']} sent / {row['proposals_viewed']} viewed / "
+        f"{row['interviews']} interviews / {row['hires']} hires"
+    ]
+
+
+# ---------------------------------------------------------------- keyword rank (plan X2)
+
+
+def _rank_alert(conn: sqlite3.Connection, message: str, now: datetime) -> None:
+    conn.execute(
+        "INSERT INTO alerts(key, message, created_at) VALUES (?,?,?) "
+        "ON CONFLICT(key) DO UPDATE SET message = excluded.message",
+        (rank.ALERT_KEY, message[:300], _iso(now)),
+    )
+
+
+def rank_part(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    config: Config,
+    client: Any,
+    now: datetime,
+) -> list[str]:
+    """Check the keyword rank once per local day. Returns lines for the daily note.
+
+    Never raises: a problem is logged and shown as the alert `rank_failed`, the daily run stays
+    ok. Not due (off, too early, already done today) = no calls and no lines."""
+    tz = _zone(config.tz)
+    if not rank.is_due(conn, settings, now, tz):
+        return []
+    # Rank has its own MCP call budget (rank.max_mcp_calls): it neither eats the budget of the
+    # jobs part nor is starved by it. runs.mcp_calls still counts every call. Fake clients in
+    # tests have no call_budget, so they just run without a separate limit.
+    budget = getattr(client, "call_budget", None)
+    try:
+        with budget("rank.max_mcp_calls") if budget else nullcontext():
+            # my profile key is needed here even when the metrics snapshot is off or has no JSS
+            metrics.ensure_profile_key(client, settings)
+            res = rank.check_ranks(client, conn, settings, now, tz=tz)
+    except rank.RankSkipped as e:
+        _rank_alert(conn, f"Keyword rank skipped: {e}", now)
+        return [f"Rank skipped: {e}"[:300]]
+    except (BudgetCapReached, ClaudeRateLimited) as e:
+        return [f"Rank not checked (Claude limit): {e}"[:300]]
+    except Exception as e:
+        log.exception("Keyword rank check failed")
+        message = f"The keyword rank check failed: {type(e).__name__}: {e}"
+        _rank_alert(conn, message, now)
+        return [message[:300]]
+    if res.failed:
+        names = ", ".join(res.failed)
+        _rank_alert(conn, f"The keyword rank check could not search: {names}", now)
+    else:
+        conn.execute("DELETE FROM alerts WHERE key = ?", (rank.ALERT_KEY,))
+    return res.lines()
+
+
+# ---------------------------------------------------------------- alerts (plan X3)
+
+
+def alerts_part(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    config: Config,
+    now: datetime,
+    snapshot: dict[str, Any] | None,
+) -> list[str]:
+    """New invites, JSS drop, rank drop: emails plus the JSS guard. Reads the database and the
+    snapshot only (no Upwork call). Never raises."""
+    try:
+        today = now.astimezone(_zone(config.tz)).date()
+        return alerts.run_alerts(conn, settings, config, now, today, snapshot)
+    except Exception as e:
+        log.exception("Alerts failed")
+        return [f"Alerts failed: {type(e).__name__}: {e}"[:300]]
 
 
 # ---------------------------------------------------------------- the run
@@ -402,6 +564,9 @@ def run_daily(
 
     skills: Counter = Counter()
     oddities: list[str] = []
+    proposal_lines: list[str] = []
+    metric_lines: list[str] = []
+    rank_lines: list[str] = []
     balance: int | None = None
     owns_client = client is None
     try:
@@ -409,6 +574,11 @@ def run_daily(
             client = ClaudeUpworkBridge(config, settings, conn, run_id)
         ensure_talent_account(client, settings)
         balance = _process(conn, settings, config, client, run_id, now, result, skills, oddities)
+        proposal_lines = after_send_part(conn, settings, config, client, run_id, now)
+        snap: dict[str, Any] = {}
+        metric_lines = metrics_part(conn, settings, config, client, now, snap)
+        rank_lines = rank_part(conn, settings, config, client, now)
+        oddities.extend(alerts_part(conn, settings, config, now, snap.get("row")))
         result.status = "ok"
     except UpworkAuthError as e:
         result.status, result.error = "auth_expired", str(e)
@@ -428,7 +598,18 @@ def run_daily(
     write_note(
         config,
         now_local,
-        _note_block(now_local, run_id, result, skills, top_n, balance, oddities),
+        _note_block(
+            now_local,
+            run_id,
+            result,
+            skills,
+            top_n,
+            balance,
+            oddities,
+            proposal_lines,
+            metric_lines,
+            rank_lines,
+        ),
     )
     log.info(
         "daily %s: seen=%d kept=%d dropped=%d",

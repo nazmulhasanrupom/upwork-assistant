@@ -21,6 +21,8 @@ import re
 import sqlite3
 import subprocess
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -59,6 +61,8 @@ READ_TOOLS: tuple[str, ...] = (
     "list_client_invitations",
     "get_freelancer_financials",
     "get_rate_insights",
+    "get_freelancer_dashboard",  # plan X1 (action check)
+    "find_freelancers",  # plan X1/X2 (actions search, get_profile)
 )
 # Belt and braces: even if READ_TOOLS were edited by mistake, these never pass.
 _FORBIDDEN_RE = re.compile(
@@ -282,6 +286,8 @@ class ClaudeUpworkBridge:
         self.cost_usd = 0.0  # total of this object's claude runs
         self.claude_runs = 0
         self._local_calls = 0
+        self._scope: list[Any] | None = None  # [setting key, calls used] while call_budget is open
+        self._scoped_calls = 0  # calls made inside any call_budget (not part of the shared limit)
 
     # -- plumbing --
 
@@ -306,10 +312,30 @@ class ClaudeUpworkBridge:
         ).fetchone()
         return int(row["mcp_calls"]) if row else 0
 
+    @contextmanager
+    def call_budget(self, setting_key: str) -> Iterator[None]:
+        """Calls made inside this block have their OWN limit (the setting `setting_key`, for
+        example `rank.max_mcp_calls`) and do not use up `upwork.max_mcp_calls_per_run`. They are
+        still added to `runs.mcp_calls`, so the run's total stays right."""
+        self.settings.get(setting_key)  # unknown key: fail now, not in the middle of a batch
+        previous = self._scope
+        self._scope = [setting_key, 0]
+        try:
+            yield
+        finally:
+            self._scope = previous
+
     def _reserve(self, wanted: int) -> int:
-        """Count up to `wanted` calls against the per-run limit. Returns how many may run."""
-        limit = int(self.settings.get("upwork.max_mcp_calls_per_run"))
-        allowed = max(0, min(wanted, limit - self.calls_made))
+        """Count up to `wanted` calls against the active limit. Returns how many may run."""
+        if self._scope is not None:
+            key, used = self._scope
+            limit = int(self.settings.get(key))
+            allowed = max(0, min(wanted, limit - used))
+            self._scope[1] += allowed
+            self._scoped_calls += allowed
+        else:
+            limit = int(self.settings.get("upwork.max_mcp_calls_per_run"))
+            allowed = max(0, min(wanted, limit - (self.calls_made - self._scoped_calls)))
         if allowed:
             if self.run_id is None:
                 self._local_calls += allowed

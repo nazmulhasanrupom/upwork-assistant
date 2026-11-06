@@ -21,6 +21,17 @@
 </section>
 {% endif %}
 
+{% if jss_guard and jss_guard.on %}
+<section aria-label="JSS guard" class="alerts" id="jss-guard">
+  {% call flash("error", "JSS guard is ON: your Job Success Score dropped, so profile tests are stopped. " ~ jss_guard.note) %}
+  <form method="post" action="/safety/jss-guard/clear" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Clear the guard", "secondary", small=true) }}
+  </form>
+  {% endcall %}
+</section>
+{% endif %}
+
 <section aria-label="Numbers" class="stats">
   {% if connects %}
   {% set hint %}{% if connects.needed is not none %}Top job needs {{ connects.needed }}. {% endif %}Seen {{ connects.seen_at | dt }}{% endset %}
@@ -38,6 +49,91 @@
   {{ stat("Waiting approval", waiting, "", "", "stat-waiting") }}
   {% endif %}
 </section>
+{% if metrics and metrics.enabled %}
+<h2>This week</h2>
+<section aria-label="This week" id="metrics-card" class="stats">
+  {% if metrics.row %}
+  {% set m = metrics.row %}
+  {{ stat("Connects", m.connects if m.connects is not none else "-", "", "", "m-connects") }}
+  {{ stat("Invites open", m.invites_open if m.invites_open is not none else "-", metrics.new_invites ~ " new in " ~ metrics.card_days ~ " days", "", "m-invites") }}
+  {{ stat("Proposals sent", m.proposals_sent, "last " ~ metrics.funnel_days ~ " days", "", "m-sent") }}
+  {{ stat("Viewed", m.proposals_viewed, "by the client", "", "m-viewed") }}
+  {{ stat("Interviews", m.interviews, "last " ~ metrics.funnel_days ~ " days", "", "m-interviews") }}
+  {{ stat("Hires", m.hires, "last " ~ metrics.funnel_days ~ " days", "", "m-hires") }}
+  {{ stat("JSS", (m.jss | round(0) | int ~ "%") if m.jss is not none else "unknown", "Job Success Score" if m.jss is not none else "Upwork gave no score", "", "m-jss") }}
+  {{ stat("Waiting for me", m.messages_awaiting_me if m.messages_awaiting_me is not none else "-", "message rooms; offers open " ~ (m.offers_open if m.offers_open is not none else "-") ~ "; active contracts " ~ (m.active_contracts if m.active_contracts is not none else "-"), "", "m-waiting") }}
+  {% else %}
+  {{ stat("Metrics", "-", "No snapshot yet. The daily run stores one each day.", "", "m-none") }}
+  {% endif %}
+</section>
+<section aria-label="Profile views" class="card panel" id="profile-views">
+  <h2 class="card-title">Profile views</h2>
+  <p class="muted small">Upwork shows no number we can read. Look at your profile stats once a week and type it here (week of {{ metrics.week_start }}).
+    {% if metrics.views_last_week is not none %}Last week: {{ metrics.views_last_week }}.{% endif %}</p>
+  <form method="post" action="/metrics/profile-views" class="filters inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field"><span>Views this week</span>
+      <input type="number" name="views" min="0" max="{{ metrics.views_max }}" step="1" inputmode="numeric" required
+             value="{{ metrics.views_this_week if metrics.views_this_week is not none else '' }}"></label>
+    <div class="filter-actions">{{ button("Save", "secondary") }}</div>
+  </form>
+</section>
+{% endif %}
+
+{% if charts %}
+<h2>Proposal funnel</h2>
+<section aria-label="Proposal funnel" class="card panel" id="funnel-chart">
+  {% if charts.funnel_svg %}
+  <ul class="legend" aria-label="Legend">
+    {% for key, label, cls in charts.funnel.series %}<li><span class="swatch {{ cls }}"></span>{{ label }}</li>{% endfor %}
+  </ul>
+  {{ charts.funnel_svg }}
+  <p class="muted small">Proposals by the week they were sent, last {{ charts.funnel_weeks }} weeks. "Viewed" = seen by the client. Interviews and hires follow the proposal status.</p>
+  {% else %}
+  <p class="muted">No proposals stored for the last {{ charts.funnel_weeks }} weeks yet. They appear after the daily run has synced your sent proposals.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if rank and rank.enabled %}
+<h2>Keyword rank</h2>
+<section aria-label="Keyword rank" id="rank-card">
+  {% if rank.entries %}
+  <div class="table-wrap">
+    <table class="table" id="rank-table">
+      <thead><tr><th>Keyword</th><th class="rank-num">Today</th><th class="rank-num">{{ rank.average_days }}-day avg</th><th class="rank-num">Organic</th></tr></thead>
+      <tbody>
+        {% for e in rank.entries %}
+        <tr>
+          <th scope="row">{{ e.keyword }}</th>
+          <td class="rank-num">{% if e.position is not none %}#{{ e.position }}{% elif e.checked %}<span class="muted">not in top {{ e.seen }}</span>{% else %}-{% endif %}</td>
+          <td class="rank-num">{% if e.average is not none %}#{{ "%.1f"|format(e.average) }}{% else %}-{% endif %}{% if e.not_found_days %} <span class="muted small">({{ e.not_found_days }} not found)</span>{% endif %}</td>
+          <td class="rank-num">{% if e.organic is not none %}#{{ e.organic }}{% else %}-{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not rank.any %}<p class="muted small">No rank check yet. It runs once a day, in the first daily run after {{ "%02d"|format(rank.run_hour) }}:00.</p>{% endif %}
+  <p class="muted small">Place in Upwork's freelancer search. Organic skips paid (boosted) results. "-" means no check yet.</p>
+  {% if charts %}
+  <h3 class="chart-heading">Rank, last {{ charts.rank_days }} days</h3>
+  <p class="muted small">Lower is better: place 1 is at the top. A cross at the bottom = not found that day.</p>
+  <ul class="chart-grid" id="rank-charts">
+    {% for r in charts.ranks %}
+    <li class="card panel">
+      <h4 class="chart-title">{{ r.keyword }} <span class="muted small">{{ r.latest }}</span></h4>
+      {% if r.svg %}{{ r.svg }}{% else %}<p class="muted small">No checks in this period yet.</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% else %}
+  <p class="muted">No keywords to check. Set <code>rank.keywords</code>.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <p>{{ button("See jobs", "secondary", href="/jobs") }} {{ button("Runs and costs", "secondary", href="/runs") }}</p>
 
 <h2>Last runs</h2>

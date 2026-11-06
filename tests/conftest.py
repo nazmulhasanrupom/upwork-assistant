@@ -113,3 +113,39 @@ def no_judging_in_daily(request, monkeypatch):
     from app.tasks import daily
 
     monkeypatch.setattr(daily, "judge_and_draft", lambda *a, **k: JudgeResult())
+
+
+@pytest.fixture(autouse=True)
+def no_after_send_in_daily(request, monkeypatch):
+    """The daily task's after-send proposal review (plan R3) is off in tests about something
+    else (their fake Upwork client only knows find_jobs). Tests marked `@pytest.mark.after_send`
+    run the real part."""
+    if request.node.get_closest_marker("after_send"):
+        return
+    from app.tasks import daily
+
+    monkeypatch.setattr(daily, "after_send_part", lambda *a, **k: [])
+
+
+@pytest.fixture(autouse=True)
+def no_metrics_in_daily(request, monkeypatch):
+    """The daily task's metrics snapshot (plan X1) is off in tests about something else (their
+    fake Upwork client only knows find_jobs). Tests marked `@pytest.mark.metrics` run the real
+    part."""
+    if request.node.get_closest_marker("metrics"):
+        return
+    from app.tasks import daily
+
+    monkeypatch.setattr(daily, "metrics_part", lambda *a, **k: [])
+
+
+@pytest.fixture(autouse=True)
+def no_rank_in_daily(request, monkeypatch):
+    """The daily task's keyword rank check (plan X2) is off in tests about something else (their
+    fake Upwork client only knows find_jobs). Tests marked `@pytest.mark.rank` run the real
+    part."""
+    if request.node.get_closest_marker("rank"):
+        return
+    from app.tasks import daily
+
+    monkeypatch.setattr(daily, "rank_part", lambda *a, **k: [])

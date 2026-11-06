@@ -21,6 +21,13 @@
       {% for s in statuses %}<option value="{{ s }}"{% if s == f_status %} selected{% endif %}>{{ s }}</option>{% endfor %}
     </select>
   </label>
+  <label class="field"><span>Can't afford</span>
+    <select name="afford">
+      <option value=""{% if f_afford == "" %} selected{% endif %}>default ({{ "hide" if hide_default else "show" }})</option>
+      <option value="show"{% if f_afford == "show" %} selected{% endif %}>show</option>
+      <option value="hide"{% if f_afford == "hide" %} selected{% endif %}>hide</option>
+    </select>
+  </label>
   <label class="field"><span>From</span><input type="date" name="date_from" value="{{ f_from }}"></label>
   <label class="field"><span>To</span><input type="date" name="date_to" value="{{ f_to }}"></label>
   <div class="filter-actions">

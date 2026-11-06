@@ -20,8 +20,8 @@ from fastapi.responses import RedirectResponse, Response
 
 from app.auth_routes import render
 from app.pages import _json
+from app.review import after_send, service
 from app.review import prechecks as pc
-from app.review import service
 from app.review.diff import word_diff
 
 log = logging.getLogger("review")
@@ -72,6 +72,43 @@ def history(request: Request) -> list[dict[str, Any]]:
     return out
 
 
+def sent_proposals(request: Request) -> list[dict[str, Any]]:
+    """Synced proposals (plan R3) with the score of their after-send review."""
+    conn: sqlite3.Connection = request.app.state.db
+    rows = conn.execute(
+        "SELECT p.*, r.score AS score, r.result AS review_result FROM proposals p "
+        "LEFT JOIN reviews r ON r.id = p.review_id ORDER BY p.created_at DESC LIMIT ?",
+        (_int_setting(request, "review.after_send_page_limit"),),
+    ).fetchall()
+    out = []
+    for r in rows:
+        diff_data = _json(r["draft_diff"], None) if r["draft_diff"] else None
+        cover = diff_data.get("cover_letter") if isinstance(diff_data, dict) else None
+        result = _json(r["review_result"], {}) if r["review_result"] else {}
+        out.append(
+            {
+                "id": r["proposal_id"],
+                "job_id": r["job_id"],
+                "title": r["job_title"] or r["proposal_id"],
+                "created_at": r["created_at"],
+                "rate": r["rate"],
+                "status": after_send.STATUS_LABELS.get(r["status"] or "", r["status"] or ""),
+                "viewed": bool(r["viewed_by_client"]),
+                "boosted": bool(r["boosted"]),
+                "text_stored": r["cover_letter"] is not None,
+                "review_id": r["review_id"],
+                "score": r["score"],
+                "score_class": score_class(request, r["score"]),
+                "error": result.get("error") if isinstance(result, dict) else None,
+                "top_issue": after_send.top_issue(result) if isinstance(result, dict) else "",
+                "similarity": round(cover["similarity"] * 100) if cover else None,
+                "draft_changed": bool(cover and cover.get("changed")),
+                "has_draft": bool(cover),
+            }
+        )
+    return out
+
+
 def _form_page(
     request: Request,
     status: int = 200,
@@ -102,6 +139,7 @@ def _form_page(
         input_max=_int_setting(request, "review.input_max_chars"),
         error=error,
         history=history(request),
+        proposals=sent_proposals(request),
     )
 
 
