@@ -32,6 +32,7 @@ services:
   scheduler:
     image: upwork-assistant:local
     command: ["supercronic", "/app/config/crontab"]
+    init: true  # reaps finished task processes the scheduler started (they outlive its tick)
     environment: *app-env
     volumes:
       - data:/data

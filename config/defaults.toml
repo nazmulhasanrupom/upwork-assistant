@@ -48,6 +48,13 @@ digest = "0 21 * * *"
 weekly = "0 6 * * 1"
 monthly = "0 7 1 * *"
 scheduler_interval_minutes = 5
+grace_minutes = 30        # a slot missed by more than this is skipped, not replayed (plan I4)
+
+[scheduler.last_due]      # written by the scheduler: the last slot handled per task (UTC, ISO)
+daily = ""
+digest = ""
+weekly = ""
+monthly = ""
 
 [models]                  # SPEC 4.4, 7.2
 think = "claude-opus-5-5"

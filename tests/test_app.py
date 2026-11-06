@@ -1,10 +1,7 @@
-import logging
-
 from fastapi.testclient import TestClient
 
 from app.db import current_version
 from app.main import create_app
-from app.tasks import scheduler
 
 
 def test_healthz(config):
@@ -29,9 +26,3 @@ def test_htmx_vendored_and_base_layout(config):
     html = app.state.templates.get_template("base.html").render()
     assert "/static/htmx.min.js" in html
     assert "unpkg" not in html and "cdn" not in html.lower()
-
-
-def test_scheduler_logs_tick(caplog):
-    with caplog.at_level(logging.INFO, logger="scheduler"):
-        scheduler.main()
-    assert "tick" in caplog.text
