@@ -13,6 +13,7 @@ from app import auth
 from app.auth_routes import router as auth_router
 from app.config import Config, load_config
 from app.db import init_db
+from app.gmail_routes import router as gmail_router
 from app.pages import install_filters
 from app.pages import router as pages_router
 from app.settings import Settings
@@ -66,6 +67,7 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(upwork_router)
+    app.include_router(gmail_router)
     app.include_router(pages_router)
 
     @app.get("/healthz")

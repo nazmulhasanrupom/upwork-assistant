@@ -353,3 +353,7 @@ details.advanced .step-title { margin-top: var(--s2); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn:disabled:hover { background: var(--surface); }
 #kill-note { margin: 0 0 var(--s1); }
+
+/* Email page (plan M1) */
+.copy-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin: var(--s2) 0; }
+.copy-row code { flex: 1 1 260px; min-width: 0; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); overflow-wrap: anywhere; }

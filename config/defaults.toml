@@ -106,25 +106,42 @@ oauth_timeout_seconds = 15
 [alerts]
 run_failed_threshold = 3        # SPEC 11: email after this many failed runs in a row
 connects_low_min_hours = 24     # max one low-Connects email per this many hours
+auth_expired_min_hours = 24     # same for "Upwork login expired"
+run_failed_min_hours = 24       # same for "run failed 3 times"
 
-[email]                   # SPEC 11
-enabled = false
-smtp_host = ""
-smtp_port = 587
+[email]                   # SPEC 11, plan M. Gmail is used when connected, else SMTP when smtp_host is set.
+smtp_host = ""            # optional fallback for people without Gmail
+smtp_port = 587           # 465 means implicit TLS
 smtp_user = ""
 smtp_password = ""
 smtp_starttls = true
 from_address = ""
 to_address = ""
-on_new_high_job = true
-on_invite = true
-on_message = true
-on_connects_low = true
-on_run_failed = true
-on_cannot_do = true
-on_daily_digest = true
-on_weekly_report = true
-on_monthly_report = true
+gmail_client_id = ""            # Google OAuth client (type Web). Entered on the Email page.
+gmail_client_secret_enc = ""    # the client secret, encrypted with SECRET_KEY (never shown again)
+gmail_address = ""              # the connected Gmail address (from the id_token)
+gmail_recipient = ""            # who gets the emails; empty = the connected address
+gmail_scope = "openid email https://www.googleapis.com/auth/gmail.send"
+gmail_auth_url = "https://accounts.google.com/o/oauth2/v2/auth"
+gmail_token_url = "https://oauth2.googleapis.com/token"
+gmail_revoke_url = "https://oauth2.googleapis.com/revoke"
+gmail_send_url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+gmail_state_minutes = 10        # a connect link is valid this long, one use
+gmail_refresh_skew_seconds = 60 # refresh this long before the access token ends
+gmail_timeout_seconds = 20
+smtp_timeout_seconds = 20
+
+[email.events]            # one switch per email (SPEC 11); all on by default
+high_job = true
+invite = true
+message = true
+connects_low = true
+auth_expired = true
+run_failed = true
+cannot_do = true
+digest = true
+weekly = true
+monthly = true
 
 [security]                # SPEC 10.4
 max_login_tries = 5           # wrong tries before the login locks

@@ -34,6 +34,10 @@ class Config:
         return self.data_dir / "tokens.enc"
 
     @property
+    def gmail_path(self) -> Path:
+        return self.data_dir / "gmail.enc"
+
+    @property
     def runs_dir(self) -> Path:
         return self.data_dir / "runs"
 

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, flash, card %}
+{% block title %}Gmail{% endblock %}
+{% block main_class %}medium{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Gmail</h1>
+</div>
+{% if ok %}
+  {{ flash("ok", "Gmail is connected" ~ (" as " ~ address if address else "") ~ ".") }}
+{% else %}
+  {{ flash("error", message) }}
+{% endif %}
+<p class="actions">{{ button("Back to the Email page", "primary", href="/settings/email") }}</p>
+{% endblock %}

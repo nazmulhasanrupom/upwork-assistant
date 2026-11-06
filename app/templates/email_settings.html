@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, flash, card, pill %}
+{% block title %}Email{% endblock %}
+{% block main_class %}medium{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Email</h1>
+  <p class="muted">The app can email you about new top jobs and problems. It sends through your
+    own Gmail account, using a Google app you create once.</p>
+</div>
+{% if notice %}{{ flash("ok", notice) }}{% endif %}
+{% if error %}{{ flash("error", error) }}{% endif %}
+{% if expired and not connected %}{{ flash("warn", "Gmail login expired. Connect Gmail again.") }}{% endif %}
+
+{% call card("Gmail") %}
+  <p class="login-status" id="gmail-status">
+    {% if connected %}{{ pill("Connected", "ok") }}
+      <span class="muted small">as <strong id="gmail-address">{{ address or "(address unknown)" }}</strong></span>
+    {% else %}{{ pill("Not connected") }}{% endif %}
+  </p>
+  {% if connected %}
+  <p class="muted">Emails go to <strong id="gmail-recipient">{{ recipient }}</strong>.</p>
+  <div class="actions">
+    <form method="post" action="/settings/email/test">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {{ button("Send test email", "primary") }}
+    </form>
+    <form method="post" action="/settings/email/disconnect">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {{ button("Disconnect", "danger") }}
+    </form>
+  </div>
+  {% else %}
+  <form method="post" action="/settings/email/connect" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Connect Gmail", "primary") }}
+    {% if not client_id or not secret_saved %}
+    <span class="muted small">Save the Google client ID and secret below first.</span>
+    {% endif %}
+  </form>
+  {% endif %}
+{% endcall %}
+
+{% call card("Google app") %}
+  <p>Redirect address to paste into Google Cloud (Authorized redirect URIs):</p>
+  {% if redirect_uri %}
+  <div class="copy-row">
+    <code id="redirect-uri">{{ redirect_uri }}</code>
+    <button type="button" class="btn btn-secondary btn-sm" id="copy-redirect"
+      data-copy="{{ redirect_uri }}">Copy</button>
+  </div>
+  <script>
+    document.getElementById("copy-redirect").addEventListener("click", function () {
+      var b = this, t = b.dataset.copy;
+      var done = function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1500); };
+      if (navigator.clipboard) { navigator.clipboard.writeText(t).then(done); }
+    });
+  </script>
+  {% else %}
+  <p class="muted">PUBLIC_BASE_URL is not set, so the address is not known yet.
+    Set it to your public HTTPS address and restart.</p>
+  {% endif %}
+
+  <h3 class="step-title">Set up once</h3>
+  <ol class="steps" id="gmail-steps">
+    {% for step in steps %}<li>{{ step }}</li>{% endfor %}
+  </ol>
+
+  <form method="post" action="/settings/email" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field"><span>Client ID</span>
+      <input type="text" name="client_id" value="{{ client_id }}" required autocomplete="off"
+        spellcheck="false" maxlength="300"></label>
+    <label class="field"><span>Client secret
+      <span class="hint">{% if secret_saved %}saved: leave empty to keep it{% else %}not saved yet{% endif %}</span></span>
+      <input type="password" name="client_secret" value="" autocomplete="off" spellcheck="false"
+        maxlength="300" {% if not secret_saved %}required{% endif %}
+        placeholder="{{ 'saved' if secret_saved else '' }}"></label>
+    <label class="field"><span>Send emails to
+      <span class="hint">empty means the connected Gmail address</span></span>
+      <input type="email" name="recipient" value="{{ recipient_saved }}" autocomplete="off"
+        maxlength="300" placeholder="{{ address }}"></label>
+    <div class="actions">{{ button("Save", "primary") }}</div>
+  </form>
+{% endcall %}
+{% endblock %}

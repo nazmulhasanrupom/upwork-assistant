@@ -19,6 +19,7 @@ from datetime import UTC, datetime, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app import mail
 from app.config import Config, load_config
 from app.db import init_db
 from app.filters.flags import flags as red_flags
@@ -208,6 +209,7 @@ def ensure_talent_account(client: Any, settings: Settings) -> None:
 def _process(
     conn: sqlite3.Connection,
     settings: Settings,
+    config: Config,
     client: Any,
     run_id: str,
     now: datetime,
@@ -300,10 +302,52 @@ def _process(
     warning = _record_connects(conn, run_id, balance, kept[0] if kept else None, now)
     if warning:
         oddities.append(warning)
+        mail.notify_connects_low(
+            conn,
+            config,
+            warning.removeprefix("Connects low: "),
+            now.date().isoformat(),
+            settings=settings,
+            now=now,
+        )
+
+    for job in kept:  # emails are not Upwork writes: sent in dry-run too
+        if job.get("tier") == "HIGH":
+            mail.notify_high_job(conn, config, job, settings=settings, now=now)
 
     if kept:  # step 7: nothing new and good means no Claude
         judge_and_draft(conn, kept)
     return balance
+
+
+def _send_failure_emails(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    config: Config,
+    run_id: str,
+    result: DailyResult,
+    now: datetime,
+) -> None:
+    """auth_expired right away; run_failed when the last N runs all failed (SPEC 11)."""
+    if result.status == "auth_expired":
+        mail.notify_auth_expired(conn, config, run_id, settings=settings, now=now)
+    elif result.status == "error":
+        n = int(settings.get("alerts.run_failed_threshold"))
+        last = conn.execute(
+            "SELECT status FROM runs WHERE task = ? ORDER BY started DESC, rowid DESC LIMIT ?",
+            (TASK, n),
+        ).fetchall()
+        if len(last) == n and all(r["status"] == "error" for r in last):
+            mail.notify_run_failed(
+                conn,
+                config,
+                TASK,
+                run_id,
+                n,
+                result.error or "unknown error",
+                settings=settings,
+                now=now,
+            )
 
 
 def run_daily(
@@ -334,7 +378,7 @@ def run_daily(
         if client is None:
             client = ClaudeUpworkBridge(config, settings, conn, run_id)
         ensure_talent_account(client, settings)
-        balance = _process(conn, settings, client, run_id, now, result, skills, oddities)
+        balance = _process(conn, settings, config, client, run_id, now, result, skills, oddities)
         result.status = "ok"
     except UpworkAuthError as e:
         result.status, result.error = "auth_expired", str(e)
@@ -348,6 +392,7 @@ def run_daily(
             client.close()
 
     _end_run(conn, run_id, result.status, result.error)
+    _send_failure_emails(conn, settings, config, run_id, result, now)
     now_local = now.astimezone(_zone(config.tz))
     top_n = int(settings.get("daily.top_skills"))
     write_note(

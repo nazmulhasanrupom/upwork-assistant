@@ -194,3 +194,53 @@ T1. Dashboard "Run now" buttons for daily, digest, weekly, monthly (POST, CSRF).
 M1. Gmail OAuth (web app flow, scope `https://www.googleapis.com/auth/gmail.send` only). User makes a Google Cloud project + OAuth client (type Web), redirect URI `${PUBLIC_BASE_URL}/gmail/callback`, puts client ID + secret in the panel (Settings → Email; secret stored encrypted with app/crypto.py) — not in env. Consent screen must be "In production" (else refresh tokens die after 7 days); doc this. "Connect Gmail" button → Google consent (access_type=offline, prompt=consent, PKCE + state stored in DB like D1) → callback stores refresh token encrypted. Send via Gmail API `users.messages.send` (raw RFC 2822, base64url) with httpx. "Send test email" button. "Disconnect" revokes. Recipient address setting (default = the connected Gmail address from `https://gmail.googleapis.com/gmail/v1/users/me/profile`).
 M2. `app/mail.py` sends through Gmail when connected (SMTP stays as optional fallback for public users). Events from SPEC 11 with on/off per event and dedupe via `emails` table. Simple clean HTML email + plain text part.
 - Done when: tests with respx pass; live: user connects Gmail and receives the test email.
+
+---
+
+# MERGE 2026-11-06: SPEC2.md (new modules). User chose "merge as new phases".
+
+Read SPEC2.md for the new modules. Mapping to the existing code:
+- SPEC2 folder layout is a target idea, not a rename. Keep `app/` (= src + admin). Runtime files live under `/data` (DATA_DIR): `/data/memory/{MEMORY,USER,PLAYBOOK,DREAMS}.md`, `/data/memory/daily/` (move existing `/data/notes/daily` there), `/data/skills/`, `/data/profile_versions/`. `USER.md` replaces `context/me.md`. `rules/HARD_RULES.md` lives in the repo (image, read-only), never in /data.
+- All Upwork reads go through the bridge (D7). New READ tools to add to `READ_TOOLS` when a step needs them: `get_freelancer_dashboard`, `find_freelancers`. Writes (`update_profile`, `manage_proposals`, `confirm_preview`) only in a separate write path after a click (Phase H / O).
+- Bridge tool params seen live: `{action, org_uid, params:{...}}`.
+
+## New build order (after Phase M, which is in progress)
+G (drafts for jobs) → R (Proposal Reviewer) → X (metrics, rank, alerts) → H (Prepare/Approve + invites) → KW (keyword discovery) → O (Profile Optimizer) → L (learning engine) → I (weekly/monthly, merged with L consolidation) → J (wizard + settings) → K (release).
+
+## Phase HR: Hard rules (small, do with G)
+HR1. `rules/HARD_RULES.md` with SPEC2 §2 text. Every Claude prompt (judge, write, review, profile) includes it first (stable prefix for caching). Python-side checks that do not trust the model: strip/flag em dashes in any generated text; block any write path that is not from a user click; JSS-drop guard flag in settings that stops Phase O.
+- Done when: tests show prompts start with the rules text, em dash checker works, rules file is not under /data.
+
+## Phase R: Proposal Reviewer (SPEC2 §4.B)
+R1. Python pre-checks (0 tokens): em dash, space before `.`/`,`, lowercase standalone "i", double spaces, "NA"/"N/A" answers, length, rate vs job budget range, first 2 lines length.
+R2. Page `/review`: pick a stored job (or paste job text) + paste cover letter + screening answers + rate → one Sonnet call (`prompts/review_proposal.md`, rules + USER.md + job (untrusted tags) + pre-check results) → JSON `{score 0-100, issues[max 5]{check, problem, fix}, fixed_version, instructions_found[], instructions_missed[]}`. Show side by side with a diff of fixed vs original. Save to `reviews` table.
+R3. After-send review once: daily task lists my proposals (`list_freelancer_proposals list`, then `get` for new ones), stores full text, runs R2 once per new proposal, emails a short result. Store "draft vs sent" diff when a sent proposal matches a draft we made (learning signal, SPEC2 §5.5).
+- Done when: tests with fixtures + fake claude; live: user pastes one of the 4 real proposals and gets a review.
+
+## Phase X: Metrics, rank, alerts (SPEC2 §4.C Phase 1, §4.D)
+X1. Daily metrics snapshot (Python + bridge reads): Connects, JSS (if in profile/dashboard data), invites (open, new, answered time), proposals funnel (sent, viewed/opened, interviews, hires), into `metrics_daily` table. Weekly "profile views" input box on dashboard → `metrics_weekly`.
+X2. Keyword rank: for each approved keyword, `find_freelancers search` (first N pages, setting), find my profile position → `rank_daily`. 7-day averages helper.
+X3. Alerts (via app/mail.py): new invite (instant) + second alert if not answered in 12 h; JSS drop (instant, also sets the JSS guard); rank drop >= setting for 3+ days; Connects too low (exists). Job list hides/marks jobs I cannot afford.
+- Done when: tests with fixtures; dashboard shows funnel + rank charts (simple inline SVG, no JS lib).
+- Manager first captures real samples of `get_freelancer_dashboard`, `find_freelancers search`, `list_freelancer_proposals list/get/invitations`, `get_profile get` into tests/fixtures/upwork/.
+
+## Phase KW: Keyword discovery (SPEC2 §4.C Phase 0)
+KW1. Seed list from SPEC2 (n8n automation, AI automation, AI agent developer, Make.com, Zapier, RAG chatbot, Python automation, workflow automation) + editable in settings. For each: demand = `find_jobs search` total_matching; competition = `find_freelancers search` total; my rank (X2). Opus picks 3 to 5 with reasons → approval item + email. Approve saves keywords → baseline starts (14 days, no profile changes).
+
+## Phase O: Profile Optimizer (SPEC2 §4.C Phase 2, §6, §7)
+O1. Profile versions: snapshot `get_profile get` before any change and daily → `/data/profile_versions/<ts>.json` + table. History page with diff and "Roll back" (creates an approval item that restores old values).
+O2. Playbook: `/data/memory/PLAYBOOK.md` seeded from SPEC2 §6 + `experiments` table (tactic, status, started, ends, baseline metrics, result). Only one active test. Blocked while baseline < 14 days or JSS guard on.
+O3. Test loop (scheduled every 14 days + Run button): Opus picks a tactic (reads playbook, metrics, top 10 profiles summary from `find_freelancers` (patterns only, never copy text)), Sonnet drafts the change with USER.md facts only → approval item with before/after. On approve → Phase H write path (`update_profile` preview → `confirm_preview`). Judge after 14 days with 7-day averages → keep / roll back (approval) / next tactic; write result to playbook.
+- D9 decision needed before O3 auto-apply: see decision list.
+
+## Phase L: Learning engine (SPEC2 §5)
+L1. Memory files + caps: MEMORY.md + USER.md <= 3,500 chars total (Python enforces; consolidation must trim). Daily notes already exist; add SQLite FTS5 index over notes + runs.
+L2. Versioning: `/data/memory` and `/data/skills` are one git repo inside the container (git in the image). Every self-change = one commit with a message. Learning page: list commits with diffs, one-click undo (git revert).
+L3. Skills: `/data/skills/<name>/SKILL.md`. Bundled starter skills in repo `skills/` copied on first run (review-proposal, check-keyword-rank, draft-profile-change). Prompts include only names + one-line summaries; full text loaded by Python when the task matches.
+L4. Weekly consolidation (Opus): reads last 7 days notes + approval/reject clicks + draft-vs-sent diffs + outcomes → patch MEMORY.md (small edits), propose skill patches, write DREAMS.md summary. Noise gate: only this job writes memory/skills. Untrusted text never becomes a skill (consolidation input marks it untrusted; Python rejects skill patches that quote job/client text verbatim > 20 words).
+L5. Weekly research (SPEC2 §6): Claude run with WebSearch/WebFetch only (no Upwork tools) → proposes playbook updates (new tactic / mark outdated, last checked date) as an approval item.
+
+## Decision points added by the merge
+- D9 (before O3): Auto-apply list. Upwork's tool says every write needs the user's real "yes" and "always allow" does not skip the preview step (SPEC 3.4). Options: (a) no auto-apply: every profile write is one click (safe, matches Upwork's stated rule); (b) auto-apply only the SPEC2 auto list. Manager recommends (a), with a "approve all small changes" batch button.
+- D10 (KW1): user approves the 3 to 5 keywords.
+- D11 (L5): OK to let a Claude run use web search weekly (small cost).

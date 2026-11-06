@@ -152,7 +152,8 @@ def dashboard_data(conn: sqlite3.Connection, tz: tzinfo, now: datetime | None = 
                 }
             )
     for a in stored_alerts:
-        alerts.append({"kind": "warn", "message": a["message"], "link": ""})
+        link = "/settings/email" if a["key"] in EMAIL_ALERTS else ""
+        alerts.append({"kind": "warn", "message": a["message"], "link": link})
 
     counts = {
         t: conn.execute(
@@ -170,6 +171,8 @@ def dashboard_data(conn: sqlite3.Connection, tz: tzinfo, now: datetime | None = 
         "today": today.isoformat(),
     }
 
+
+EMAIL_ALERTS = {"gmail_expired", "email_failed"}  # their message points to the Email page
 
 # What the dashboard says after a "Run now" click. Fixed texts only (never echo the query).
 RUN_MESSAGES = {

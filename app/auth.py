@@ -38,6 +38,7 @@ PUBLIC_PATHS = {
     "/setup/admin",
     "/setup/admin/totp",
     "/setup/admin/confirm",
+    "/gmail/callback",
 }
 ISSUER = "Upwork Assistant"
 
