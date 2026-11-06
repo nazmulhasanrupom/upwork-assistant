@@ -1,0 +1,45 @@
+{# Last runs + Run now. HTMX swaps this whole block every 5 s while a task runs; once nothing
+   runs, the block comes back without hx-trigger and the polling stops. #}
+<div id="runs"{% if any_busy %} hx-get="/tasks/runs" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
+{% if kill_switch %}
+<p class="muted small" id="kill-note">The kill switch is on, so tasks cannot be started.</p>
+{% endif %}
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col" class="num">Upwork calls</th><th scope="col">Run</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+  {% set run = row.run %}
+  <tr{% if run and run.error %} class="has-error"{% endif %} id="task-{{ row.task }}">
+    <th scope="row">{{ row.task }}</th>
+    {% if run %}
+    <td><span class="status {{ run.status }}">{{ run.status }}</span></td>
+    <td>{{ run.started | dt }}</td>
+    <td class="num">{{ run.mcp_calls or 0 }}</td>
+    {% else %}
+    <td colspan="3" class="muted">never run</td>
+    {% endif %}
+    <td class="run-cell">
+      {% if row.busy %}
+      <button class="btn btn-secondary btn-sm" type="button" disabled>Running</button>
+      <span class="small muted">{% if row.since %}running since {{ row.since | dt }}{% else %}just started{% endif %}</span>
+      {% elif not row.built %}
+      <button class="btn btn-secondary btn-sm" type="button" disabled>Run now</button>
+      <span class="small muted">not built yet</span>
+      {% elif kill_switch %}
+      <button class="btn btn-secondary btn-sm" type="button" disabled>Run now</button>
+      <span class="small muted">kill switch is on</span>
+      {% else %}
+      <form method="post" action="/tasks/{{ row.task }}/run" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn btn-secondary btn-sm" type="submit">Run now</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% if run and run.error %}<tr class="run-error"><td colspan="5" class="small">{{ run.error }}</td></tr>{% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>

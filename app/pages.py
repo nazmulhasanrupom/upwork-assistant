@@ -14,9 +14,10 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 
 from app.auth_routes import render
+from app.tasks import lock, trigger
 from app.upwork.jobs import CLOSE_TAG, OPEN_TAG
 
 router = APIRouter()
@@ -26,7 +27,7 @@ STATUSES = ("candidate", "judged", "drafted", "prepared", "sent", "skipped", "dr
 STATUS_ACTIVE = ""  # default: everything except dropped jobs
 STATUS_ALL = "all"
 UPWORK_PREFIX = "https://www.upwork.com/"
-TASKS = ("daily", "digest", "weekly", "monthly")  # shown on the dashboard even if never run
+TASKS = trigger.TASKS  # shown on the dashboard even if never run
 
 
 # ---------------------------------------------------------------- helpers
@@ -170,10 +171,69 @@ def dashboard_data(conn: sqlite3.Connection, tz: tzinfo, now: datetime | None = 
     }
 
 
-@router.get("/")
-def dashboard(request: Request) -> Response:
+# What the dashboard says after a "Run now" click. Fixed texts only (never echo the query).
+RUN_MESSAGES = {
+    "started": ("ok", "Started. The table below refreshes while it runs."),
+    "busy": ("warn", "That task is already running."),
+    "unbuilt": ("warn", "That task is not built yet."),
+    "killed": ("error", "The kill switch is on, so nothing was started."),
+}
+
+
+def runs_panel(request: Request) -> dict:
+    """Data for the Last runs table: one row per task, with the Run now state."""
+    config = request.app.state.config
     data = dashboard_data(request.app.state.db, _tz(request))
-    return render(request, "dashboard.html", **data)
+    busy = trigger.running(config)
+    rows = []
+    for task, run in data["last_runs"].items():
+        rows.append(
+            {
+                "task": task,
+                "run": run,
+                "built": trigger.is_built(task),
+                "busy": task in busy,
+                "since": busy.get(task, ""),
+            }
+        )
+    return {
+        "rows": rows,
+        "any_busy": bool(busy),
+        "kill_switch": bool(request.app.state.settings.get("general.kill_switch")),
+    }
+
+
+@router.get("/")
+def dashboard(request: Request, msg: str = "") -> Response:
+    data = dashboard_data(request.app.state.db, _tz(request))
+    return render(
+        request, "dashboard.html", **data, **runs_panel(request), notice=RUN_MESSAGES.get(msg)
+    )
+
+
+@router.get("/tasks/runs")
+def runs_partial(request: Request) -> Response:
+    """The Last runs table alone. HTMX asks for it every 5 s while a task runs."""
+    return render(request, "_runs_table.html", **runs_panel(request))
+
+
+@router.post("/tasks/{name}/run")
+def run_task(request: Request, name: str) -> Response:
+    """Start a task now, detached. Login + CSRF are checked by the app-wide guard."""
+    if name not in TASKS:
+        raise HTTPException(status_code=404, detail="Unknown task")
+    app = request.app
+    if app.state.settings.get("general.kill_switch"):
+        outcome = "killed"
+    else:
+        try:
+            trigger.start(app.state.config, name)
+            outcome = "started"
+        except trigger.NotBuilt:
+            outcome = "unbuilt"
+        except lock.TaskBusy:
+            outcome = "busy"
+    return RedirectResponse(f"/?msg={outcome}", status_code=303)
 
 
 # ---------------------------------------------------------------- jobs list

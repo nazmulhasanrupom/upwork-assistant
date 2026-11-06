@@ -7,6 +7,12 @@
   <p class="muted">Signed in as {{ user }}. New today: {{ today }}.</p>
 </div>
 
+{% if notice %}
+<section aria-label="Run now" class="alerts">
+  {{ flash(notice[0], notice[1]) }}
+</section>
+{% endif %}
+
 {% if alerts %}
 <section aria-label="Alerts" class="alerts">
   {% for a in alerts %}
@@ -31,26 +37,5 @@
 <p>{{ button("See jobs", "secondary", href="/jobs") }}</p>
 
 <h2>Last runs</h2>
-<div class="table-wrap">
-<table class="table">
-  <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col" class="num">Upwork calls</th></tr></thead>
-  <tbody>
-  {% for task, run in last_runs.items() %}
-  <tr{% if run and run.error %} class="has-error"{% endif %}>
-    <th scope="row">{{ task }}</th>
-    {% if run %}
-    <td>
-      <span class="status {{ run.status }}">{{ run.status }}</span>
-    </td>
-    <td>{{ run.started | dt }}</td>
-    <td class="num">{{ run.mcp_calls or 0 }}</td>
-    {% else %}
-    <td colspan="3" class="muted">never run</td>
-    {% endif %}
-  </tr>
-  {% if run and run.error %}<tr class="run-error"><td colspan="4" class="small">{{ run.error }}</td></tr>{% endif %}
-  {% endfor %}
-  </tbody>
-</table>
-</div>
+{% include "_runs_table.html" %}
 {% endblock %}

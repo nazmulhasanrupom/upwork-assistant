@@ -24,6 +24,7 @@ from app.db import init_db
 from app.filters.flags import flags as red_flags
 from app.filters.tiers import prefilter, tier
 from app.settings import Settings
+from app.tasks.lock import TaskBusy, task_lock
 from app.upwork import accounts
 from app.upwork import jobs as J
 from app.upwork.bridge import ClaudeUpworkBridge
@@ -367,8 +368,13 @@ def run_daily(
 def main() -> int:
     config = load_config()
     logging.basicConfig(level=config.log_level.upper())
-    conn = init_db(config.db_path)
-    result = run_daily(conn, Settings(conn), config)
+    try:
+        with task_lock(config.data_dir, TASK):  # panel button and scheduler share this lock
+            conn = init_db(config.db_path)
+            result = run_daily(conn, Settings(conn), config)
+    except TaskBusy:
+        log.warning("Daily task is already running: nothing started")
+        return 0
     return 0 if result.status in ("ok", "skipped") else 1
 
 
