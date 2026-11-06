@@ -191,10 +191,18 @@ def test_auth_expired(conn, settings, config):
     assert "auth_expired" in next((config.data_dir / "notes" / "daily").glob("*.md")).read_text()
 
 
-def test_not_connected_is_auth_expired(conn, settings, config):
-    # the real client with no token file: fails before any network call
+def test_not_logged_in_is_auth_expired(conn, settings, config, fake_claude_stream):
+    # the real bridge with a fake claude that says the Upwork server needs a login
+    fake_claude_stream.env("FAKE_SERVER_STATUS", "needs-auth")
     res = daily.run_daily(conn, settings, config)
     assert res.status == "auth_expired"
+    assert "log in" in res.error.lower()
+
+
+def test_no_claude_binary_is_an_error(conn, settings, config, monkeypatch):
+    monkeypatch.setenv("PATH", "/nonexistent")
+    res = daily.run_daily(conn, settings, config)
+    assert res.status == "error" and "claude" in res.error
 
 
 def test_other_error(conn, config):

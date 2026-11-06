@@ -1,4 +1,8 @@
-"""Client for the Upwork MCP server over Streamable HTTP (SPEC 3.4, 5, 6.2).
+"""UNUSED direct path, blocked by Upwork allow list. Kept for reference. The app talks to Upwork
+through `app/upwork/bridge.py` (headless Claude Code with its own Upwork MCP login).
+Only `ToolResult` and the error classes are still imported from here.
+
+Client for the Upwork MCP server over Streamable HTTP (SPEC 3.4, 5, 6.2).
 
 Flow: `initialize` -> read `Mcp-Session-Id` -> `notifications/initialized` -> `tools/call`.
 Replies can be plain JSON or an SSE stream; both are parsed and the message with our id wins.
@@ -93,6 +97,18 @@ class ToolResult:
     content: list[dict[str, Any]] = field(default_factory=list)
     structured: Any = None
     is_error: bool = False
+    # Set by the Claude bridge on error results: "missing" (Claude skipped the call) or
+    # "budget" (the per-run call limit stopped it). Normal tool errors leave it empty.
+    error_kind: str | None = None
+
+    def unwrap(self) -> Any:
+        """`data()` for a good result. Raises CallBudgetExceeded / UpworkToolError otherwise."""
+        if self.is_error:
+            text = self.text.strip() or "The tool reported an error."
+            if self.error_kind == "budget":
+                raise CallBudgetExceeded(text[:ERROR_TEXT_MAX])
+            raise UpworkToolError(text[:ERROR_TEXT_MAX])
+        return self.data()
 
     @property
     def text(self) -> str:

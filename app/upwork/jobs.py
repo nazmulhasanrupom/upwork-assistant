@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from app.settings import Settings, load_defaults
-from app.upwork.client import UpworkToolError
+from app.upwork.client import CallBudgetExceeded, ToolResult, UpworkToolError
 
 log = logging.getLogger(__name__)
 
@@ -204,16 +204,42 @@ def parse_detail(payload: Any) -> dict[str, Any]:
     }
 
 
+def detail_call(job_id: str, org_uid: str) -> tuple[str, dict[str, Any]]:
+    return TOOL, {"action": ACTION_GET, "org_uid": org_uid, "params": {P_JOB_ID: str(job_id)}}
+
+
+def _parse_detail_result(res: ToolResult) -> dict[str, Any] | Exception:
+    """A parsed detail, or the exception the caller should handle (never raised here)."""
+    try:
+        return parse_detail(res.unwrap())
+    except (UpworkToolError, CallBudgetExceeded, JobsError) as e:
+        return e
+
+
+def fetch_details(
+    client: Any, job_ids: list[str], org_uid: str | None = None
+) -> list[dict[str, Any] | Exception]:
+    """`find_jobs get` for many jobs in one batch (client.call_many).
+
+    One entry per job id, in order: the parsed detail, or an exception object for that job
+    (UpworkToolError, CallBudgetExceeded, JobsError). Auth and Claude errors are raised.
+    """
+    if not job_ids:
+        return []
+    org = org_uid or _org_uid_from(client)
+    results = client.call_many([detail_call(j, org) for j in job_ids])
+    return [_parse_detail_result(r) for r in results]
+
+
 def fetch_detail(client: Any, job_id: str, org_uid: str | None = None) -> dict[str, Any]:
-    """One `find_jobs get` call. Returns the parsed detail.
+    """One `find_jobs get` call. Returns the parsed detail or raises its error.
 
     org_uid defaults to the talent org_uid in the client's settings.
     """
-    org = org_uid or _org_uid_from(client)
-    payload = client.call_json(
-        TOOL, {"action": ACTION_GET, "org_uid": org, "params": {P_JOB_ID: str(job_id)}}
-    )
-    return parse_detail(payload)
+    out = fetch_details(client, [job_id], org_uid)[0]
+    if isinstance(out, Exception):
+        raise out
+    return out
 
 
 def _org_uid_from(client: Any) -> str:
@@ -386,10 +412,10 @@ def apply_detail(
 # ---------------------------------------------------------------- search
 
 
-def _search(client: Any, org_uid: str, action: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+def _search_jobs(res: ToolResult, action: str) -> list[dict[str, Any]]:
     try:
-        payload = client.call_json(TOOL, {"action": action, "org_uid": org_uid, "params": params})
-    except UpworkToolError as e:
+        payload = res.unwrap()
+    except (UpworkToolError, CallBudgetExceeded) as e:
         log.warning("find_jobs %s failed: %s", action, e)
         return []
     if not isinstance(payload, dict):
@@ -457,8 +483,14 @@ def fetch_candidates(
         )
 
     merged: dict[str, dict[str, Any]] = {}
-    for action, params in plans:
-        for job in _search(client, str(org_uid), action, params):
+    results = client.call_many(  # all searches in one batch
+        [
+            (TOOL, {"action": action, "org_uid": str(org_uid), "params": params})
+            for action, params in plans
+        ]
+    )
+    for (action, _), res in zip(plans, results, strict=True):
+        for job in _search_jobs(res, action):
             jid = job.get("id")
             if jid is None:
                 continue

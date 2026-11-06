@@ -1,5 +1,7 @@
 """Daily cycle, steps 1 to 7 of SPEC 6.2 (no Claude yet). Run: python -m app.tasks.daily
 
+Upwork is reached through the Claude bridge (`app/upwork/bridge.py`), in batches.
+
 Flow: find jobs, drop the ones already seen, pre-filter on search data, `find_jobs get` for the
 survivors, tier + red flags, save to the DB, record Connects, write the daily note.
 Steps 8 to 10 (judge and draft with Claude) are a hook: `judge_and_draft`.
@@ -24,13 +26,12 @@ from app.filters.tiers import prefilter, tier
 from app.settings import Settings
 from app.upwork import accounts
 from app.upwork import jobs as J
+from app.upwork.bridge import ClaudeUpworkBridge
 from app.upwork.client import (
     CallBudgetExceeded,
     UpworkAuthError,
-    UpworkMCP,
     UpworkToolError,
 )
-from app.upwork.oauth import UpworkOAuth
 
 log = logging.getLogger("daily")
 
@@ -233,18 +234,28 @@ def _process(
 
     kept: list[dict[str, Any]] = []
     balance: int | None = None
-    for i, job in enumerate(survivors):  # steps 5, 6
-        try:
-            detail = J.fetch_detail(client, job["id"], org_uid)
-        except CallBudgetExceeded:
-            left = len(survivors) - i
-            oddities.append(
-                f"MCP call limit reached: {left} job(s) left for the next run (not saved yet)."
-            )
-            break
-        except (UpworkToolError, J.JobsError) as e:
-            oddities.append(f"tool error on job {job['id']}: {e}"[:300])
-            continue
+    batch = max(1, int(settings.get("claude.fetch_batch_size")))
+
+    def fetched_details():
+        """Step 5: `find_jobs get` in batches. Yields (search job, detail) as each batch returns,
+        so a later failure does not lose earlier jobs."""
+        for start in range(0, len(survivors), batch):
+            chunk = survivors[start : start + batch]
+            outcomes = J.fetch_details(client, [j["id"] for j in chunk], org_uid)
+            for pos, (job, outcome) in enumerate(zip(chunk, outcomes, strict=True)):
+                if isinstance(outcome, CallBudgetExceeded):
+                    left = len(survivors) - start - pos
+                    oddities.append(
+                        f"MCP call limit reached: {left} job(s) left for the next run"
+                        " (not saved yet)."
+                    )
+                    return
+                if isinstance(outcome, (UpworkToolError, J.JobsError)):
+                    oddities.append(f"tool error on job {job['id']}: {outcome}"[:300])
+                    continue
+                yield job, outcome
+
+    for job, detail in fetched_details():  # step 6
         full = J.apply_detail(job, detail, settings)
         if full.get("connects_balance") is not None:
             balance = full["connects_balance"]
@@ -302,7 +313,7 @@ def run_daily(
     *,
     now: datetime | None = None,
 ) -> DailyResult:
-    """Run the daily cycle once. `client` is for tests (a fake MCP client)."""
+    """Run the daily cycle once. `client` is for tests (any object with `call_many`)."""
     now = now or _now()
     run_id = _start_run(conn, now)
     result = DailyResult(run_id=run_id, status="running")
@@ -320,7 +331,7 @@ def run_daily(
     owns_client = client is None
     try:
         if client is None:
-            client = UpworkMCP(settings, UpworkOAuth(config, settings, conn), conn, run_id)
+            client = ClaudeUpworkBridge(config, settings, conn, run_id)
         ensure_talent_account(client, settings)
         balance = _process(conn, settings, client, run_id, now, result, skills, oddities)
         result.status = "ok"

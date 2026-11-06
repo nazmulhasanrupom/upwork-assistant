@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Fake `claude` for the Upwork bridge tests. It prints a stream-json log like the real CLI.
+
+FAKE_CLAUDE_LOG      path: argv, cwd, CLAUDE_CONFIG_DIR and stdin facts are written there (JSON)
+FAKE_CLAUDE_MODE     echo (default) | replay | rate_limit | no_result | bad_exit
+  replay             prints the file FAKE_CLAUDE_STREAM as is
+  echo               parses the numbered calls in the prompt ("1. mcp__upwork__upwork__tool {json}")
+                     and answers each one from FAKE_UPWORK_RULES (JSON file: a list of
+                     {"tool": "...", "args": {subset of the call args}, "text": "...",
+                      "is_error": false}; the first matching rule wins; no rule = tool error)
+FAKE_SKIP            comma list of 1-based call numbers Claude "forgets"
+FAKE_EXTRA           1 = Claude also makes a call nobody asked for
+FAKE_REORDER         1 = answer the calls in reverse order
+FAKE_SERVER_STATUS   status of the upwork MCP server in the init event (default connected)
+FAKE_COST            total_cost_usd in the result event (default 0.005)
+"""
+
+import json
+import os
+import re
+import sys
+
+mode = os.environ.get("FAKE_CLAUDE_MODE", "echo")
+argv = sys.argv[1:]
+
+stdin_text = None
+try:
+    stdin_text = sys.stdin.read()
+except Exception:
+    pass
+
+log_path = os.environ.get("FAKE_CLAUDE_LOG")
+if log_path:
+    with open(log_path, "a") as f:
+        f.write(
+            json.dumps(
+                {
+                    "argv": argv,
+                    "cwd": os.getcwd(),
+                    "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
+                    "stdin": stdin_text,
+                }
+            )
+            + "\n"
+        )
+
+
+def emit(obj):
+    print(json.dumps(obj), flush=True)
+
+
+if mode == "replay":
+    with open(os.environ["FAKE_CLAUDE_STREAM"]) as f:
+        sys.stdout.write(f.read())
+    sys.exit(0)
+
+if mode == "rate_limit":
+    emit({"type": "result", "subtype": "success", "is_error": True, "api_error_status": 429,
+          "result": "API Error: 429 rate_limit_error: usage limit reached",
+          "total_cost_usd": 0, "usage": {}})
+    sys.exit(1)
+
+if mode == "no_result":
+    print("claude crashed", file=sys.stderr)
+    sys.exit(1)
+
+prompt = argv[argv.index("-p") + 1]
+calls = []
+for m in re.finditer(r"^(\d+)\. (mcp__upwork__upwork__\w+) (\{.*\})$", prompt, re.M):
+    calls.append((int(m.group(1)), m.group(2), json.loads(m.group(3))))
+
+rules = []
+if os.environ.get("FAKE_UPWORK_RULES"):
+    with open(os.environ["FAKE_UPWORK_RULES"]) as f:
+        rules = json.load(f)
+
+
+def subset(want, have):
+    if isinstance(want, dict):
+        return isinstance(have, dict) and all(k in have and subset(v, have[k]) for k, v in want.items())
+    return want == have
+
+
+def answer(name, args):
+    tool = name.split("__")[-1]
+    for r in rules:
+        if r["tool"] == tool and subset(r.get("args", {}), args):
+            return r.get("text", "{}"), bool(r.get("is_error"))
+    return f"no fake rule for {tool}", True
+
+
+skip = {int(x) for x in os.environ.get("FAKE_SKIP", "").split(",") if x}
+status = os.environ.get("FAKE_SERVER_STATUS", "connected")
+
+emit({"type": "system", "subtype": "init", "session_id": "x",
+      "mcp_servers": [{"name": "upwork", "status": status, "source": "user"}]})
+
+todo = [c for c in calls if c[0] not in skip]
+if os.environ.get("FAKE_REORDER") == "1":
+    todo.reverse()
+extra = []
+if os.environ.get("FAKE_EXTRA") == "1":
+    extra = [(0, "mcp__upwork__upwork__list_accounts", {"unrequested": True})]
+
+n = 0
+for num, name, args in extra + todo:
+    n += 1
+    tid = f"toolu_fake_{n}"
+    emit({"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": tid, "name": name, "input": args}]}})
+    if status == "needs-auth":
+        continue
+    text, is_error = answer(name, args)
+    block = {"type": "tool_result", "tool_use_id": tid, "content": [{"type": "text", "text": text}]}
+    if is_error:
+        block["is_error"] = True
+    emit({"type": "user", "message": {"role": "user", "content": [block]}})
+
+emit({"type": "assistant", "message": {"role": "assistant",
+                                         "content": [{"type": "text", "text": "DONE"}]}})
+emit({"type": "result", "subtype": "success", "is_error": False, "result": "DONE",
+      "num_turns": 3, "total_cost_usd": float(os.environ.get("FAKE_COST", "0.005")),
+      "usage": {"input_tokens": 10, "cache_creation_input_tokens": 20,
+                "cache_read_input_tokens": 30, "output_tokens": 5}})

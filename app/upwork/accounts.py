@@ -57,8 +57,10 @@ def parse_accounts(payload: Any) -> list[dict[str, str]]:
 
 
 def detect_and_save(client: Any, settings: Settings) -> DetectResult:
-    """Call list_accounts once and store the outcome. Tool/network errors are not caught here."""
-    accounts = parse_accounts(client.call_json(TOOL, {}))
+    """Call list_accounts once and store the outcome. Tool/login errors are not caught here.
+
+    `client` is anything with `call_many` (the Claude bridge, or a fake in tests)."""
+    accounts = parse_accounts(client.call_many([(TOOL, {})])[0].unwrap())
     if not accounts:
         return DetectResult("none", MSG_NONE)
     if len(accounts) == 1:

@@ -1,4 +1,7 @@
-"""Upwork OAuth 2 + PKCE for a public client (SPEC 3.6, 13.1). No client secret.
+"""UNUSED direct path, blocked by Upwork allow list. Kept for reference (plan P2).
+The app talks to Upwork through `app/upwork/bridge.py` instead.
+
+Upwork OAuth 2 + PKCE for a public client (SPEC 3.6, 13.1). No client secret.
 
 - `client_id` is the URL of our own metadata document: ${PUBLIC_BASE_URL}/oauth/client-metadata.json
 - `state` and the PKCE verifier live in the DB table `oauth_state`, not in the session cookie.

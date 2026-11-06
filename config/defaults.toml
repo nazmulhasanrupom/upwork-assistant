@@ -52,6 +52,7 @@ scheduler_interval_minutes = 5
 [models]                  # SPEC 4.4, 7.2
 think = "claude-opus-5-5"
 write = "claude-sonnet-5-5"
+fetch = "claude-haiku-5-5"  # cheap model that only relays read-only Upwork tool calls (plan P1)
 think_effort = "medium"   # passed only if the CLI supports an effort setting
 write_effort = "high"
 
@@ -63,8 +64,12 @@ write_max_budget_usd = 0.50
 monthly_cap_usd = 50.0
 max_jobs_per_think_call = 5
 max_proposals_per_write_call = 3
+fetch_max_budget_usd = 0.25     # cap for one Upwork fetch run (plan P1)
+fetch_batch_size = 8            # Upwork tool calls per claude run
+fetch_timeout_seconds = 300
+config_dir = ""                 # CLAUDE_CONFIG_DIR for fetch runs; empty = $CLAUDE_CONFIG_DIR or <data dir>/claude
 
-[upwork]                  # SPEC 5
+[upwork]                  # SPEC 5. The mcp_* and oauth_* keys belong to the unused direct client (client.py, oauth.py)
 max_mcp_calls_per_run = 40
 mcp_calls_per_second = 1
 preview_lifetime_minutes = 30   # guess, to be measured on day 1

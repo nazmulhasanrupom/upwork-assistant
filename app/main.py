@@ -16,7 +16,7 @@ from app.db import init_db
 from app.pages import install_filters
 from app.pages import router as pages_router
 from app.settings import Settings
-from app.upwork.metadata import router as upwork_router
+from app.upwork.routes import router as upwork_router
 
 APP_DIR = Path(__file__).parent
 

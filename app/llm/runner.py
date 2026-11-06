@@ -206,9 +206,14 @@ def build_command(
     return cmd
 
 
-def _save_call(
-    conn: sqlite3.Connection, run_id: str, model: str, data: dict[str, Any]
+def save_call(
+    conn: sqlite3.Connection,
+    run_id: str,
+    model: str,
+    data: dict[str, Any],
+    task: str | None = None,
 ) -> tuple[int, int, float]:
+    """Store one `claude_calls` row from a claude `result` object. Returns (in, out, cost)."""
     usage = data.get("usage") or {}
     n_in = (
         int(usage.get("input_tokens") or 0)
@@ -220,8 +225,8 @@ def _save_call(
     if n_in or n_out or cost:
         conn.execute(
             "INSERT INTO claude_calls(run_id, model, input_tokens, output_tokens, cost_usd, "
-            "created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (run_id, model, n_in, n_out, cost, _utc_iso(datetime.now(UTC))),
+            "created_at, task) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (run_id, model, n_in, n_out, cost, _utc_iso(datetime.now(UTC)), task),
         )
     return n_in, n_out, cost
 
@@ -294,7 +299,7 @@ def run_claude(
             f"claude did not return valid JSON (exit code {proc.returncode})."
         ) from None
 
-    n_in, n_out, cost = _save_call(conn, run_id, model, data)
+    n_in, n_out, cost = save_call(conn, run_id, model, data, task)
 
     failed = bool(data.get("is_error")) or proc.returncode != 0
     if failed:

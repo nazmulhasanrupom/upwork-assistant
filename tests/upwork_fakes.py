@@ -6,7 +6,7 @@ import copy
 import json
 from pathlib import Path
 
-from app.upwork.client import UpworkToolError
+from app.upwork.client import CallBudgetExceeded, ToolResult, UpworkToolError
 
 FIX = Path(__file__).parent / "fixtures" / "upwork"
 
@@ -15,8 +15,41 @@ def load(name: str):
     return json.loads((FIX / name).read_text())
 
 
-class FakeMCP:
-    """Stands in for UpworkMCP. `script` maps (action, mode-or-title) to a payload or Exception."""
+def to_result(name, payload):
+    """What the Claude bridge gives back for one call: a ToolResult.
+
+    `payload` is the tool's JSON answer. A UpworkToolError becomes an error result, a
+    CallBudgetExceeded a "budget" error result. Any other exception is raised, as the bridge
+    raises UpworkAuthError and Claude errors for the whole batch.
+    """
+    if isinstance(payload, CallBudgetExceeded):
+        text = str(payload)
+        content = [{"type": "text", "text": text}]
+        return ToolResult(name, content, is_error=True, error_kind="budget")
+    if isinstance(payload, UpworkToolError):
+        return ToolResult(name, [{"type": "text", "text": str(payload)}], is_error=True)
+    if isinstance(payload, Exception):
+        raise payload
+    return ToolResult(name, [{"type": "text", "text": json.dumps(payload)}])
+
+
+class CallManyMixin:
+    """`call_many` built on `call_json`: each call is answered in order."""
+
+    def call_many(self, calls):
+        out = []
+        for name, args in calls:
+            try:
+                payload = self.call_json(name, args)
+            except Exception as e:
+                payload = e
+            out.append(to_result(name, payload))
+        return out
+
+
+class FakeMCP(CallManyMixin):
+    """Stands in for the Claude bridge. `search` maps a mode or title to a payload or Exception;
+    `details` maps a job id to a payload or Exception (see `to_result` for what each does)."""
 
     def __init__(self, settings, search=None, details=None, accounts=None):
         self.accounts = accounts  # payload (or Exception) returned by list_accounts
@@ -24,6 +57,9 @@ class FakeMCP:
         self.search = search or {}
         self.details = details or {}
         self.calls: list[tuple[str, dict]] = []
+
+    def close(self):
+        pass
 
     def call_json(self, name, arguments=None):
         self.calls.append((name, copy.deepcopy(arguments)))
@@ -54,7 +90,7 @@ def accounts_payload(*roles_and_names):
     return data
 
 
-class FakeAccountsMCP:
+class FakeAccountsMCP(CallManyMixin):
     """Only list_accounts. `closed` shows the web code closed it."""
 
     def __init__(self, payload):

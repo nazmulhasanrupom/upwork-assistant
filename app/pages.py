@@ -135,7 +135,10 @@ def dashboard_data(conn: sqlite3.Connection, tz: tzinfo, now: datetime | None = 
             alerts.append(
                 {
                     "kind": "error",
-                    "message": f"Upwork login expired ({r['task']} run). Connect Upwork again.",
+                    "message": (
+                        f"Upwork login expired ({r['task']} run). "
+                        "Log in to Upwork in Claude Code again (see the Upwork page)."
+                    ),
                     "link": "/upwork",
                 }
             )

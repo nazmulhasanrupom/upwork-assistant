@@ -32,16 +32,12 @@ COOKIE_NAME = "ua_session"
 CSRF_HEADER = "x-csrf-token"
 CSRF_FIELD = "csrf_token"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-# /oauth/start is NOT public: it needs a login. The callback must be public, because the
-# SameSite=Strict session cookie is not sent on the redirect back from Upwork.
 PUBLIC_PATHS = {
     "/healthz",
     "/login",
     "/setup/admin",
     "/setup/admin/totp",
     "/setup/admin/confirm",
-    "/oauth/client-metadata.json",
-    "/oauth/callback",
 }
 ISSUER = "Upwork Assistant"
 

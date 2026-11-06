@@ -9,47 +9,29 @@
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 
-{% call card("Login") %}
-{% if st.state == "connected" %}
-  <p>{{ pill("Connected", "ok") }}</p>
+{% call card("Connection") %}
+  <p>Upwork is reached through Claude Code. A small, cheap model ({{ model }}) makes read-only
+    Upwork calls for this app and the app reads the raw answers. Nothing is changed on Upwork
+    from this page.</p>
   <dl class="kv">
-    <div><dt>Access token ends</dt><dd><code>{{ st.expires_at }}</code> (UTC)
-      {% if st.expired %}<span class="error-text">expired, it is renewed on the next call</span>
-      {% elif minutes_left is not none %}<span class="muted">(in about {{ minutes_left }} min)</span>{% endif %}</dd></div>
-    <div><dt>Refresh token</dt><dd>{{ "saved" if st.has_refresh_token else "none, you must connect again when the access token ends" }}</dd></div>
-    {% if st.scope %}<div><dt>Scope</dt><dd><code class="wrap">{{ st.scope }}</code></dd></div>{% endif %}
+    <div><dt>Last fetch cost</dt><dd id="last-fetch">
+      {% if fetch %}${{ "%.4f"|format(fetch.cost_usd) }}
+        <span class="muted">({{ fetch.model }}, {{ fetch.created_at | dt }})</span>
+      {% else %}<span class="muted">no fetch yet</span>{% endif %}</dd></div>
   </dl>
-  <form method="post" action="/upwork/disconnect" class="actions">
+  <form method="post" action="/upwork/test" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Disconnect", "danger") }}
+    {{ button("Test connection", "primary") }}
   </form>
-{% elif st.state == "unreadable" %}
-  {{ flash("error", st.message) }}
-  <form method="post" action="/upwork/disconnect" class="actions">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Disconnect", "danger") }}
-  </form>
-{% else %}
-  <p>{{ pill("Not connected", "warn") }}</p>
-{% endif %}
-{% if st.state != "connected" %}
-  {% if base_ok %}
-  <form method="post" action="/oauth/start" class="actions">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Connect Upwork", "primary") }}
-  </form>
-  {% else %}
-  {{ flash("error", "PUBLIC_BASE_URL is not set. Upwork needs your public HTTPS address to log in.") }}
-  {% endif %}
-{% endif %}
 {% endcall %}
 
-{% if st.state == "connected" %}
 {% call card("Freelancer account") %}
   {% if account %}
-  <p>In use: <strong>{{ account.name or "(no name)" }}</strong> (<code>{{ account.org_uid }}</code>)</p>
+  <p>In use: <strong>{{ account.name or "(no name)" }}</strong> {{ pill("Freelancer", "ok") }}
+    <br><span class="muted small">Account id <code>{{ account.org_uid }}</code></span></p>
   {% else %}
-  {{ flash("error", "No freelancer account is selected yet. Jobs cannot be searched until one is.") }}
+  <p class="muted">No freelancer account is selected yet. Press "Test connection" to look for it.
+    Only your freelancer (TALENT) account is used; client and agency accounts are ignored.</p>
   {% endif %}
   {% if candidates %}
   <form method="post" action="/upwork/account" class="stack">
@@ -63,19 +45,14 @@
     <div class="actions">{{ button("Use this account", "primary") }}</div>
   </form>
   {% endif %}
-  <form method="post" action="/upwork/detect" class="actions">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Detect account", "secondary") }}
-  </form>
 {% endcall %}
-{% endif %}
 
-{% if base_ok %}
-{% call card("This copy's app identity") %}
-<dl class="kv">
-  <div><dt>Client ID</dt><dd><code class="wrap">{{ client_id }}</code></dd></div>
-  <div><dt>Redirect URL</dt><dd><code class="wrap">{{ redirect_uri }}</code></dd></div>
-</dl>
+{% call card("How to log in") %}
+  <p>The Upwork login lives in Claude Code, inside this app's container. Do this once, and again
+    if the login expires:</p>
+  <ol id="login-steps" class="steps">
+    {% for step in steps %}<li>{{ step }}</li>
+    {% endfor %}
+  </ol>
 {% endcall %}
-{% endif %}
 {% endblock %}

@@ -16,9 +16,22 @@ def config(tmp_path):
     )
 
 
-@pytest.fixture
-def fake_claude(tmp_path, monkeypatch):
-    """Put tests/fakes/claude first on PATH. Returns a helper to set mode and read the log."""
+@pytest.fixture(autouse=True)
+def no_real_claude(tmp_path_factory, monkeypatch):
+    """Tests must never start the real `claude`. A stub that fails goes first on PATH;
+    the fake_claude fixtures put their own fake in front of it."""
+    import os
+    import stat
+
+    bindir = tmp_path_factory.mktemp("stubbin")
+    stub = bindir / "claude"
+    stub.write_text("#!/bin/sh\necho 'real claude must not run in tests' >&2\nexit 99\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+
+
+def _install_fake_claude(tmp_path, monkeypatch, script):
+    """Put tests/fakes/<script> first on PATH as `claude`. Returns a helper (mode, log)."""
     import json
     import os
     import shutil
@@ -28,7 +41,7 @@ def fake_claude(tmp_path, monkeypatch):
     bindir = tmp_path / "fakebin"
     bindir.mkdir()
     target = bindir / "claude"
-    shutil.copy(Path(__file__).parent / "fakes" / "claude", target)
+    shutil.copy(Path(__file__).parent / "fakes" / script, target)
     target.chmod(target.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     log = tmp_path / "fake_claude_log.json"
@@ -44,6 +57,23 @@ def fake_claude(tmp_path, monkeypatch):
             return log.exists()
 
         def log(self):
-            return json.loads(log.read_text())
+            """Log of the first call (the stream fake writes one JSON line per call)."""
+            return json.loads(log.read_text().splitlines()[0])
+
+        def logs(self):
+            return [json.loads(x) for x in log.read_text().splitlines()]
+
+        def env(self, name, value):
+            monkeypatch.setenv(name, str(value))
 
     return Fake()
+
+
+@pytest.fixture
+def fake_claude(tmp_path, monkeypatch):
+    return _install_fake_claude(tmp_path, monkeypatch, "claude")
+
+
+@pytest.fixture
+def fake_claude_stream(tmp_path, monkeypatch):
+    return _install_fake_claude(tmp_path, monkeypatch, "claude_stream")

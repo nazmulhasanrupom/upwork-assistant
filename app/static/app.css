@@ -329,3 +329,8 @@ pre.text {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Numbered steps (Upwork page: how to log in) */
+.steps { margin: 0; padding-left: 1.25rem; }
+.steps li { margin-bottom: var(--s2); overflow-wrap: anywhere; }
+.steps li:last-child { margin-bottom: 0; }

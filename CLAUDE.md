@@ -3,8 +3,8 @@
 Self-hosted bot for one Upwork freelancer. Design: `SPEC.md`. Build steps: `plan.md`.
 
 ## Rules
-- Code does the work. Claude only thinks and writes (no Upwork tools for Claude).
-- Python talks to the Upwork MCP. Every write is preview, then `confirm_preview` after a user click.
+- Code does the work. Claude thinks and writes. The only Upwork access is `app/upwork/bridge.py`: headless Claude makes exact READ-ONLY tool calls (`READ_TOOLS`) and Python reads the raw results. `client.py`/`oauth.py` are an unused direct path (Upwork allow list).
+- Every write is preview, then `confirm_preview` after a user click.
 - Dry-run is ON by default. Never call `confirm_preview` on our own.
 - Tunable values live in `config/defaults.toml` and the `settings` table. No hard-coded numbers.
 - Nothing personal in the repo (names, emails, IDs, domains).

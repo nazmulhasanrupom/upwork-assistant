@@ -1,22 +1,18 @@
 """Auto-detect the freelancer account (plan F0a). Fake MCP only, no network."""
 
+import json
 import re
-from urllib.parse import parse_qs, urlparse
 
-import httpx
 import pytest
-import respx
 
 from app.db import init_db
 from app.settings import Settings
 from app.tasks import daily
 from app.upwork import accounts
 from app.upwork.client import UpworkAuthError, UpworkToolError
-from app.upwork.oauth import UpworkOAuth
 from tests.test_auth import csrf_from, login, make_client, setup_admin
 from tests.test_daily import ORG
 from tests.test_daily import make_client as make_daily_client
-from tests.test_oauth import TOKEN_URL, put_tokens, token_body
 from tests.upwork_fakes import FakeAccountsMCP, accounts_payload, load
 
 ONE = accounts_payload(("TALENT", "Sample Freelancer", "111"), ("CLIENT", "Co", "222"))
@@ -90,7 +86,6 @@ def web(config):
     secret = setup_admin(c)
     c.cookies.clear()
     login(c, secret)
-    put_tokens(UpworkOAuth(config, app.state.settings, app.state.db))
     return app, c
 
 
@@ -105,23 +100,52 @@ def post(c, path, **data):
     return c.post(path, data={"csrf_token": token, **data})
 
 
-def test_detect_button_one_account(web):
+def test_page_has_button_login_help_and_no_oauth(web):
     app, c = web
-    assert "Detect account" in c.get("/upwork").text
-    assert "No freelancer account is selected" in c.get("/upwork").text
+    page = c.get("/upwork").text
+    assert "Test connection" in page and 'action="/upwork/test"' in page
+    assert "How to log in" in page and "claude mcp add" in page and "/mcp" in page
+    assert "No freelancer account is selected" in page and "no fetch yet" in page
+    assert "Connect Upwork" not in page and "/oauth/" not in page
+
+
+def test_oauth_routes_are_gone(web):
+    app, c = web
+    assert c.get("/oauth/client-metadata.json", follow_redirects=False).status_code in (303, 404)
+    c.cookies.clear()
+    assert c.get("/oauth/client-metadata.json", follow_redirects=False).status_code in (303, 404)
+    assert c.get("/oauth/callback", follow_redirects=False).status_code in (303, 404)
+    from app import auth
+
+    assert not any("oauth" in p for p in auth.PUBLIC_PATHS)
+
+
+def test_test_connection_one_account(web):
+    app, c = web
     fake = use(app, ONE)
-    r = post(c, "/upwork/detect")
+    r = post(c, "/upwork/test")
     assert r.status_code == 200 and "Sample Freelancer" in r.text
+    assert fake.calls == [("list_accounts", {})]  # one list_accounts batch
     assert fake.closed
     assert app.state.settings.get("upwork.talent_org_uid") == "111"
     page = c.get("/upwork").text
     assert "In use:" in page and "Sample Freelancer" in page and "111" in page
+    assert "Client" not in page.split("Freelancer account")[1].split("How to log in")[0]
 
 
-def test_detect_two_accounts_shows_form_then_pick(web):
+def test_page_shows_last_fetch_cost(web):
+    app, c = web
+    from app.llm.runner import save_call
+
+    save_call(app.state.db, "fetch-1", "claude-haiku-5-5", {"total_cost_usd": 0.0123}, "fetch")
+    page = c.get("/upwork").text
+    assert "$0.0123" in page and "claude-haiku-5-5" in page
+
+
+def test_test_connection_two_accounts_shows_form_then_pick(web):
     app, c = web
     use(app, TWO)
-    r = post(c, "/upwork/detect")
+    r = post(c, "/upwork/test")
     assert r.status_code == 200
     assert 'action="/upwork/account"' in r.text and "Freelancer A" in r.text
     assert "Freelancer B" in r.text and "Ag" not in re.findall(r"\(<code>444", r.text)
@@ -135,122 +159,73 @@ def test_detect_two_accounts_shows_form_then_pick(web):
 def test_pick_rejects_unknown_account(web):
     app, c = web
     use(app, TWO)
-    post(c, "/upwork/detect")
+    post(c, "/upwork/test")
     r = post(c, "/upwork/account", org_uid="444")
     assert r.status_code == 400 and "not one of the detected" in r.text
     assert app.state.settings.get("upwork.talent_org_uid") == ""
 
 
-def test_detect_zero_accounts_error(web):
+def test_test_connection_zero_accounts_error(web):
     app, c = web
     use(app, ZERO)
-    r = post(c, "/upwork/detect")
+    r = post(c, "/upwork/test")
     assert r.status_code == 400
     assert "No freelancer account found. Agency accounts are not supported." in r.text
 
 
 @pytest.mark.parametrize("exc", [UpworkToolError("boom <b>x</b>"), RuntimeError("secret")])
-def test_detect_failure_is_shown(web, exc):
+def test_test_connection_failure_is_shown(web, exc):
     app, c = web
     use(app, exc)
-    r = post(c, "/upwork/detect")
-    assert r.status_code == 400 and "Could not detect" in r.text
+    r = post(c, "/upwork/test")
+    assert r.status_code == 400 and "Test failed" in r.text
     assert "<b>x</b>" not in r.text and "secret" not in r.text  # escaped / not leaked
 
 
-def test_detect_login_expired(web):
+def test_test_connection_claude_errors_are_shown(web):
+    from app.llm.runner import ClaudeRateLimited
+
     app, c = web
-    use(app, UpworkAuthError("x"))
-    assert "login expired" in post(c, "/upwork/detect").text.lower()
+    use(app, ClaudeRateLimited("Claude is rate limited"))
+    r = post(c, "/upwork/test")
+    assert r.status_code == 400 and "rate limited" in r.text
 
 
-def test_detect_and_pick_need_csrf_and_login(web):
+def test_test_connection_login_expired(web):
     app, c = web
-    assert c.post("/upwork/detect").status_code == 403
+    use(app, UpworkAuthError("Upwork login in Claude Code is missing or expired."))
+    r = post(c, "/upwork/test")
+    assert r.status_code == 400 and "missing or expired" in r.text
+
+
+def test_test_and_pick_need_csrf_and_login(web):
+    app, c = web
+    assert c.post("/upwork/test").status_code == 403
     assert c.post("/upwork/account", data={"org_uid": "1"}).status_code == 403
     c.cookies.clear()
-    assert c.post("/upwork/detect").status_code in (303, 403)
+    assert c.post("/upwork/test").status_code in (303, 403)
     assert app.state.settings.get("upwork.talent_org_uid") == ""
 
 
-def test_detect_when_not_connected(config):
-    app, c = make_client(config)
-    secret = setup_admin(c)
-    c.cookies.clear()
-    login(c, secret)
-    use(app, ONE)
-    r = post(c, "/upwork/detect")
-    assert r.status_code == 400 and "Connect Upwork first" in r.text
-    assert "Detect account" not in c.get("/upwork").text
-
-
-# ---------- the callback ----------
-
-
-def start_state(c):
-    r = post(c, "/oauth/start")
-    return parse_qs(urlparse(r.headers["location"]).query)["state"][0]
-
-
-@pytest.fixture
-def callback(config):
-    app, c = make_client(config)
-    secret = setup_admin(c)
-    c.cookies.clear()
-    login(c, secret)
-
-    def go(payload):
-        state = start_state(c)
-        fake = use(app, payload)
-        c.cookies.clear()  # Upwork's redirect carries no session cookie
-        with respx.mock:
-            respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, json=token_body()))
-            r = c.get("/oauth/callback", params={"code": "abc", "state": state})
-        return r, fake
-
-    return app, c, go
-
-
-def test_callback_detects_one_account(callback, config):
-    app, _, go = callback
-    r, fake = go(ONE)
+def test_test_connection_with_the_real_bridge_and_fake_claude(
+    web, fake_claude_stream, tmp_path, monkeypatch
+):
+    app, c = web
+    rules = tmp_path / "rules.json"
+    rules.write_text(json.dumps([{"tool": "list_accounts", "text": json.dumps(ONE)}]))
+    monkeypatch.setenv("FAKE_UPWORK_RULES", str(rules))
+    r = post(c, "/upwork/test")
     assert r.status_code == 200 and "Sample Freelancer" in r.text
-    assert "set-cookie" not in r.headers
-    assert fake.calls == [("list_accounts", {})] and fake.closed
-    assert app.state.settings.get("upwork.talent_org_uid") == "111"
+    assert "$0.0050" in c.get("/upwork").text  # cost of the fake run
+    argv = fake_claude_stream.log()["argv"]
+    assert argv[argv.index("--allowedTools") + 1] == "mcp__upwork__upwork__list_accounts"
 
 
-def test_callback_two_accounts_points_to_pick_form(callback):
-    app, _, go = callback
-    r, _ = go(TWO)
-    assert r.status_code == 200 and "More than one freelancer account" in r.text
-    assert app.state.settings.get("upwork.talent_org_uid") == ""
-    assert len(accounts.candidates(app.state.settings)) == 2
-
-
-def test_callback_zero_accounts(callback):
-    _, _, go = callback
-    r, _ = go(ZERO)
-    assert r.status_code == 200 and "Upwork is connected" in r.text
-    assert "No freelancer account found. Agency accounts are not supported." in r.text
-
-
-def test_callback_still_works_when_list_accounts_fails(callback, config):
-    app, _, go = callback
-    r, _ = go(UpworkToolError("tool down"))
-    assert r.status_code == 200 and "Upwork is connected" in r.text
-    assert "Could not detect the freelancer account: tool down" in r.text
-    assert 'href="/upwork"' in r.text and "Detect account" in r.text
-    assert config.tokens_path.exists()
-    assert app.state.settings.get("upwork.talent_org_uid") == ""
-
-
-def test_callback_without_login_makes_no_detect_call(config):
-    app, c = make_client(config)
-    setup_admin(c)
-    fake = use(app, ONE)
-    r = c.get("/oauth/callback", params={"code": "x", "state": "nope"})
-    assert r.status_code == 400 and fake.calls == []
+def test_test_connection_when_claude_says_login_needed(web, fake_claude_stream, monkeypatch):
+    app, c = web
+    monkeypatch.setenv("FAKE_SERVER_STATUS", "needs-auth")
+    r = post(c, "/upwork/test")
+    assert r.status_code == 400 and "Upwork login in Claude Code" in r.text
 
 
 # ---------- the daily task ----------
