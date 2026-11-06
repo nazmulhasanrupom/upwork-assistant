@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Fake `claude` CLI for tests. Behaviour is chosen with FAKE_CLAUDE_MODE.
+
+Modes: ok (default), rate_limit, auth, bad_json, no_output, bad_output, error_turns, not_ok_text.
+If FAKE_CLAUDE_LOG is set, the arguments, cwd and token presence are written there as JSON.
+"""
+
+import json
+import os
+import sys
+
+mode = os.environ.get("FAKE_CLAUDE_MODE", "ok")
+log_path = os.environ.get("FAKE_CLAUDE_LOG")
+if log_path:
+    with open(log_path, "w") as f:
+        json.dump(
+            {
+                "argv": sys.argv[1:],
+                "cwd": os.getcwd(),
+                "has_oauth": bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")),
+                "has_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
+                "input_exists": os.path.exists("input.json"),
+            },
+            f,
+        )
+
+
+def result(**extra):
+    base = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": "ok",
+        "num_turns": 2,
+        "total_cost_usd": 0.0123,
+        "usage": {
+            "input_tokens": 100,
+            "cache_creation_input_tokens": 20,
+            "cache_read_input_tokens": 30,
+            "output_tokens": 40,
+        },
+    }
+    base.update(extra)
+    print(json.dumps(base))
+
+
+if mode == "ok":
+    out = os.environ.get("FAKE_CLAUDE_OUTPUT", '{"results": [1, 2]}')
+    with open("output.json", "w") as f:
+        f.write(out)
+    result()
+elif mode == "rate_limit":
+    result(
+        subtype="error_during_execution",
+        is_error=True,
+        result="API Error: 429 rate_limit_error: usage limit reached",
+        total_cost_usd=0,
+        usage={},
+    )
+    sys.exit(1)
+elif mode == "auth":
+    result(
+        subtype="error_during_execution",
+        is_error=True,
+        result="Invalid API key - Please run /login",
+        total_cost_usd=0,
+        usage={},
+    )
+    sys.exit(1)
+elif mode == "error_turns":
+    result(subtype="error_max_turns", is_error=True, result="Reached max turns")
+    sys.exit(1)
+elif mode == "bad_json":
+    print("this is not json {")
+elif mode == "no_output":
+    result()
+elif mode == "bad_output":
+    with open("output.json", "w") as f:
+        f.write("{not json")
+    result()
+elif mode == "not_ok_text":
+    result(result="hello there")
+else:
+    print("unknown fake mode", file=sys.stderr)
+    sys.exit(2)

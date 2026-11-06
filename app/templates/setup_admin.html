@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Create the admin{% endblock %}
+{% block content %}
+<h1>Create the admin account</h1>
+<p>This page only works until the first admin exists.</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/setup/admin">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Setup code (printed in the container log as "SETUP CODE") <input name="setup_code" autocomplete="off" required></label>
+  <label>User name <input name="username" autocomplete="username" required></label>
+  <label>Password <input name="password" type="password" autocomplete="new-password" required></label>
+  <label>Password again <input name="password2" type="password" autocomplete="new-password" required></label>
+  <button type="submit">Next</button>
+</form>
+{% endblock %}

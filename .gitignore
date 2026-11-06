@@ -1,0 +1,12 @@
+.env
+test_keys.txt
+data/
+.venv/
+__pycache__/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.pyc
+.pytest_cache/
+.ruff_cache/

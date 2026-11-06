@@ -1,0 +1,10 @@
+.git
+.venv
+.env
+test_keys.txt
+data/
+__pycache__/
+*.pyc
+*.db
+.pytest_cache/
+.ruff_cache/

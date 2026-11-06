@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title or job.job_id }}{% endblock %}
+{% block content %}
+<p><a href="/jobs">&larr; Jobs</a></p>
+<h1>
+  {% if job.tier %}<span class="badge {{ job.tier }}">{{ job.tier }}{% if job.tier_estimated %} (est.){% endif %}</span>{% endif %}
+  {{ job.title or job.job_id }}
+</h1>
+{% if link %}<p><a href="{{ link }}" rel="noopener noreferrer" target="_blank">Open on Upwork</a></p>{% endif %}
+
+{% if flags %}<div class="flags">{% for f in flags %}<span>{{ f }}</span>{% endfor %}</div>{% endif %}
+{% if job.drop_reason %}<p>Dropped: {{ job.drop_reason }}</p>{% endif %}
+
+<h2>Stored fields</h2>
+<table class="kv">
+  <tr><th>Job ID</th><td>{{ job.job_id }}</td></tr>
+  <tr><th>Status</th><td>{{ job.status }}</td></tr>
+  <tr><th>First seen</th><td>{{ job.first_seen | dt }}</td></tr>
+  <tr><th>Type</th><td>{{ job.job_type or "" }}</td></tr>
+  <tr><th>Budget</th><td>{% if job.budget_min is not none %}{{ job.budget_min }}{% if job.budget_max != job.budget_min %} - {{ job.budget_max }}{% endif %}{% else %}n/a{% endif %}
+    {% if job.hourly_budget_type %}<small>({{ job.hourly_budget_type }})</small>{% endif %}</td></tr>
+  <tr><th>Rate paid</th><td>{{ (job.rate_paid | rate) or "n/a" }}</td></tr>
+  <tr><th>Tier</th><td>{{ job.tier or "" }}{% if job.tier_estimated %} (estimated){% endif %}</td></tr>
+  <tr><th>Client spend</th><td>{{ (job.client_spend | money) or "n/a" }}</td></tr>
+  <tr><th>Client hours</th><td>{{ job.client_hours if job.client_hours is not none else "n/a" }}</td></tr>
+  <tr><th>Client hires</th><td>{{ job.client_hires if job.client_hires is not none else "n/a" }}</td></tr>
+  <tr><th>Client rating</th><td>{{ job.client_rating if job.client_rating is not none else "n/a" }}
+    {% if job.client_reviews is not none %}({{ job.client_reviews }} reviews){% endif %}</td></tr>
+  {% if details.client_country %}<tr><th>Client country</th><td>{{ details.client_country }}</td></tr>{% endif %}
+  {% if details.hire_rate is not none and details.hire_rate is defined %}<tr><th>Hire rate</th><td>{{ details.hire_rate }}%</td></tr>{% endif %}
+  <tr><th>Proposals</th><td>{{ job.proposals_tier or "n/a" }}</td></tr>
+  <tr><th>Connects cost</th><td>{{ job.connects_cost if job.connects_cost is not none else "n/a" }}</td></tr>
+  {% if details.experience_level %}<tr><th>Experience</th><td>{{ details.experience_level }}</td></tr>{% endif %}
+  {% if details.duration %}<tr><th>Duration</th><td>{{ details.duration }}</td></tr>{% endif %}
+  {% if details.skills %}<tr><th>Skills</th><td>{{ details.skills | join(", ") }}</td></tr>{% endif %}
+</table>
+
+{% if judgement %}
+<h2>Fit</h2>
+<p>Score: {{ judgement.fit_score }}</p>
+{% if judgement.why_apply %}<p>{{ judgement.why_apply }}</p>{% endif %}
+{% if judgement.risks %}<p>Risks: {{ judgement.risks }}</p>{% endif %}
+{% endif %}
+
+{% if details.description %}
+<h2>Job text</h2>
+<pre class="text">{{ details.description | untrusted }}</pre>
+{% endif %}
+
+{% if details.screening_questions %}
+<h2>Screening questions</h2>
+<ol>{% for q in details.screening_questions %}<li>{{ q | untrusted }}</li>{% endfor %}</ol>
+{% endif %}
+
+{% if details.reviews %}
+<h2>Latest client reviews</h2>
+<ul>{% for r in details.reviews %}<li>{{ r.score }}/5 - {{ (r.comment | untrusted) or "(no comment)" }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h2>Draft</h2>
+<div class="placeholder">No draft yet. Drafts, Prepare and Approve come in a later phase.</div>
+{% endblock %}

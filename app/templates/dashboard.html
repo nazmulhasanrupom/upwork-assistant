@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p>Signed in as {{ user }}.</p>
+
+{% if alerts %}
+<section aria-label="Alerts">
+  {% for a in alerts %}
+  <div class="alert {{ a.kind }}" role="alert">{{ a.message }}{% if a.link %} <a href="{{ a.link }}">Open</a>{% endif %}</div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<h2>Connects</h2>
+{% if connects %}
+<p class="{{ 'warn' if low_connects else '' }}" id="connects">
+  Balance: <strong>{{ connects.balance }}</strong>
+  {% if connects.needed is not none %}(top job needs {{ connects.needed }}){% endif %}
+  {% if low_connects %} - LOW{% endif %}
+  <small>seen {{ connects.seen_at | dt }}</small>
+</p>
+{% else %}
+<p>No Connects balance seen yet. It is read when the daily task fetches a job.</p>
+{% endif %}
+
+<h2>New today ({{ today }})</h2>
+<p>MID: <strong>{{ counts.MID }}</strong> &nbsp; HIGH: <strong>{{ counts.HIGH }}</strong>
+  &nbsp; <a href="/jobs">See jobs</a></p>
+
+<h2>Last runs</h2>
+<table class="kv">
+  {% for task, run in last_runs.items() %}
+  <tr>
+    <th>{{ task }}</th>
+    <td>
+      {% if run %}
+      <span class="status {{ run.status }}">{{ run.status }}</span>
+      {{ run.started | dt }}
+      {% if run.mcp_calls %}<small>({{ run.mcp_calls }} Upwork calls)</small>{% endif %}
+      {% if run.error %}<br><small class="error">{{ run.error }}</small>{% endif %}
+      {% else %}never run{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

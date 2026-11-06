@@ -1,0 +1,118 @@
+# Default settings. The `settings` table in SQLite overrides these.
+# Keys are addressed as "<section>.<name>", for example "pay.good_spending".
+
+[general]
+dry_run = true            # SPEC 14: nothing is sent to Upwork while true
+kill_switch = false       # stops all tasks at once
+timezone = "UTC"
+
+[pay]                     # SPEC 8.2, 8.3
+good_spending = 5000      # min client total spent (USD)
+low_rate_max = 10         # rate_paid <= this is LOW
+mid_rate_min = 11
+mid_rate_max = 20
+high_rate_min = 21
+hourly_budget_min = 11    # hourly job budget max must be >= this
+fixed_budget_min = 300    # fixed job budget min (USD)
+low_rate_high_hires = 100 # "total_hires is high" for the LOW rule
+fit_min = 65              # SPEC 8.5: min fit score to go to the writing model
+
+[flags]                   # SPEC 8.4
+feedback_min = 4.5
+feedback_min_reviews = 3
+bad_review_score_max = 2  # a review with score <= this is a flag
+hire_rate_min = 40
+bad_proposals_tier = "50+"
+
+[search]                  # SPEC 8.1
+keywords = []             # built from the profile skills in the wizard
+recent_days_posted = 1
+verified_payment_only = true
+best_match_limit = 20     # jobs asked per smart_search best_match call
+recent_limit = 20         # jobs asked per smart_search most_recent call
+keyword_limit = 10        # jobs asked per keyword search call
+max_keywords = 10         # at most this many keyword searches per run
+description_max_chars = 3000   # job text sent on to Claude is cut to this
+review_comment_chars = 200     # client review comments are cut to this
+max_reviews = 5                # latest client reviews kept per job
+
+[daily]                   # SPEC 6.2, 9.1
+top_skills = 10                 # skills listed in the daily note
+
+[ui]
+jobs_page_size = 50             # cards per page on /jobs
+
+[schedules]               # SPEC 9, cron in the configured time zone
+daily = "0 */2 * * *"
+digest = "0 21 * * *"
+weekly = "0 6 * * 1"
+monthly = "0 7 1 * *"
+scheduler_interval_minutes = 5
+
+[models]                  # SPEC 4.4, 7.2
+think = "claude-opus-5-5"
+write = "claude-sonnet-5-5"
+think_effort = "medium"   # passed only if the CLI supports an effort setting
+write_effort = "high"
+
+[claude]                  # SPEC 7.2, 7.3
+think_max_turns = 6
+think_max_budget_usd = 1.00
+write_max_turns = 6
+write_max_budget_usd = 0.50
+monthly_cap_usd = 50.0
+max_jobs_per_think_call = 5
+max_proposals_per_write_call = 3
+
+[upwork]                  # SPEC 5
+max_mcp_calls_per_run = 40
+mcp_calls_per_second = 1
+preview_lifetime_minutes = 30   # guess, to be measured on day 1
+mcp_url = "https://mcp.upwork.com/mcp"
+talent_org_uid = ""             # the freelancer account's org_uid (from list_accounts), set in the wizard
+talent_name = ""                # display name of that account (from list_accounts)
+talent_candidates = []          # TALENT accounts waiting for the admin to pick one
+mcp_protocol_version = "2025-06-18"  # MCP Streamable HTTP; the server may answer with an older one
+mcp_timeout_seconds = 30
+mcp_max_tries = 3               # tries per request on 429, 5xx, or network errors
+mcp_backoff_seconds = 1.0       # wait before try 2; doubles each time (Retry-After wins)
+mcp_retry_after_max_seconds = 60  # never wait longer than this, even if Upwork asks
+# OAuth (SPEC 3.6). The scope is unknown: empty means the scope parameter is not sent.
+oauth_authorize_url = "https://www.upwork.com/ab/account-security/oauth2/authorize"
+oauth_token_url = "https://www.upwork.com/api/v3/oauth2/token"
+oauth_revoke_url = "https://www.upwork.com/api/v3/oauth2/token/revoke"
+oauth_scope = ""
+oauth_send_resource = true      # RFC 8707: send resource=<mcp_url> on authorize, token, refresh
+oauth_state_minutes = 10        # a login link is valid this long, one use
+oauth_refresh_skew_seconds = 60 # refresh this long before the access token ends
+oauth_default_expires_in = 3600 # used when the token answer has no expires_in
+oauth_timeout_seconds = 15
+
+[alerts]
+run_failed_threshold = 3        # SPEC 11: email after this many failed runs in a row
+connects_low_min_hours = 24     # max one low-Connects email per this many hours
+
+[email]                   # SPEC 11
+enabled = false
+smtp_host = ""
+smtp_port = 587
+smtp_user = ""
+smtp_password = ""
+smtp_starttls = true
+from_address = ""
+to_address = ""
+on_new_high_job = true
+on_invite = true
+on_message = true
+on_connects_low = true
+on_run_failed = true
+on_cannot_do = true
+on_daily_digest = true
+on_weekly_report = true
+on_monthly_report = true
+
+[security]                # SPEC 10.4
+max_login_tries = 5           # wrong tries before the login locks
+lockout_minutes = 15
+session_hours = 12
+password_min_length = 12

@@ -1,0 +1,36 @@
+body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 0 auto; padding: 1rem; line-height: 1.5; }
+header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ccc; padding-bottom: .5rem; }
+form label { display: block; margin: .6rem 0; }
+form input { display: block; margin-top: .2rem; padding: .35rem; width: 100%; max-width: 22rem; box-sizing: border-box; }
+form.inline { margin: 0; }
+button { padding: .4rem .9rem; }
+.error { color: #a00000; font-weight: 600; }
+code.wrap { word-break: break-all; }
+footer { margin-top: 2rem; color: #666; }
+nav a { margin-right: .8rem; }
+body { max-width: 60rem; }
+.badge { display: inline-block; padding: .05rem .5rem; border-radius: .6rem; font-size: .8rem; font-weight: 700; color: #fff; background: #777; }
+.badge.HIGH { background: #1b7a2f; }
+.badge.MID { background: #1f5fa8; }
+.badge.LOW { background: #888; }
+.status { font-weight: 600; }
+.status.ok { color: #1b7a2f; }
+.status.error, .status.auth_expired { color: #a00000; }
+.status.skipped, .status.running { color: #8a6100; }
+.alert { padding: .5rem .8rem; margin: .4rem 0; border-left: 4px solid #8a6100; background: #fff6dd; }
+.alert.error { border-color: #a00000; background: #fde8e8; }
+.warn { color: #a05a00; font-weight: 600; }
+.cards { list-style: none; padding: 0; }
+.card { border: 1px solid #ccc; border-radius: .4rem; padding: .6rem .9rem; margin: .7rem 0; }
+.card h3 { margin: 0 0 .3rem 0; font-size: 1.05rem; }
+.meta span { margin-right: 1rem; white-space: nowrap; }
+.flags span { display: inline-block; background: #fde8e8; color: #7a0000; border-radius: .3rem; padding: 0 .4rem; margin: .1rem .25rem .1rem 0; font-size: .85rem; }
+form.filters { display: flex; flex-wrap: wrap; gap: .8rem; align-items: flex-end; }
+form.filters label { margin: 0; }
+form.filters select, form.filters input { display: block; width: auto; padding: .3rem; }
+table.kv { border-collapse: collapse; width: 100%; }
+table.kv th { text-align: left; width: 12rem; vertical-align: top; padding: .2rem .5rem .2rem 0; color: #444; }
+table.kv td { padding: .2rem 0; }
+pre.text { white-space: pre-wrap; background: #f6f6f6; padding: .6rem; border-radius: .3rem; }
+.placeholder { border: 1px dashed #999; padding: .8rem; color: #555; }
+.pager a { margin-right: 1rem; }

@@ -1,0 +1,24 @@
+services:
+  panel:
+    build: .
+    image: upwork-assistant:local
+    command: ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - data:/data
+    restart: unless-stopped
+
+  scheduler:
+    image: upwork-assistant:local
+    command: ["supercronic", "/app/config/crontab"]
+    env_file: .env
+    volumes:
+      - data:/data
+    depends_on:
+      - panel
+    restart: unless-stopped
+
+volumes:
+  data:

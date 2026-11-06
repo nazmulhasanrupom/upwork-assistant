@@ -1,0 +1,2 @@
+# supercronic: the scheduler runs every 5 minutes and decides what is due.
+*/5 * * * * python -m app.tasks.scheduler
