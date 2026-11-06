@@ -53,6 +53,19 @@ build_profile_max_chars = 12000 # profile text sent to Claude is cut to this
 build_max_turns = 4
 build_max_budget_usd = 0.30
 
+[review]                  # SPEC2 4.B, plan R (proposal reviewer)
+length_warn_chars = 1800        # a longer cover letter gets a warning
+length_max_chars = 5000         # Upwork's hard maximum for a cover letter
+first_lines_max_chars = 260     # the first 2 lines are the part the client sees first
+first_lines_min_chars = 40      # shorter than this: note only
+input_max_chars = 20000         # biggest text the form accepts per box
+timeout_seconds = 300            # one review call may run this long
+job_text_max_chars = 12000      # pasted job text is cut to this before it goes to Claude
+job_list_limit = 60             # recent jobs offered in the job picker
+history_limit = 30              # past reviews listed on /review
+score_good = 80                 # score badge: this or more is green
+score_ok = 60                   # score badge: this or more is yellow, below is red
+
 [schedules]               # SPEC 9, cron in the configured time zone
 daily = "0 */2 * * *"
 digest = "0 21 * * *"
@@ -81,6 +94,8 @@ write_max_turns = 6
 write_max_budget_usd = 0.50
 monthly_cap_usd = 50.0
 cap_warn_percent = 80           # dashboard and /runs warn when the month's cost reaches this share of the cap
+review_max_turns = 6
+review_max_budget_usd = 0.50
 max_jobs_per_think_call = 5
 max_proposals_per_write_call = 3
 retry_hours = 48                # jobs still waiting for a judgement or a draft are retried for this long

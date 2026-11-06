@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, flash, card, pill, copy_button %}
+{% block title %}Review {{ review.id }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Review #{{ review.id }}{% if review.job_title %}: {{ review.job_title }}{% endif %}</h1>
+  <p class="muted"><time>{{ review.created_at | dt }}</time>{% if review.model %} &middot; {{ review.model }}{% endif %} &middot; Claude cost ${{ "%.4f"|format(review.cost) }}
+    &middot; <a href="/review{% if review.job_id %}?job_id={{ review.job_id }}{% endif %}">Review another</a>
+    {% if review.job_id %}&middot; <a href="/jobs/{{ review.job_id }}">Open the job</a>{% endif %}</p>
+</div>
+
+{% if review.error %}{{ flash("warn", review.error) }}{% endif %}
+{% for w in review.result.warnings or [] %}{{ flash("warn", w) }}{% endfor %}
+
+<section class="score-row" aria-label="Score">
+  {% if review.score is not none %}
+  <div class="score-badge big {{ review.score_class }}" id="score-badge" aria-label="Score {{ review.score }} out of 100"><strong>{{ review.score }}</strong><span>/ 100</span></div>
+  <p class="muted score-text">
+    {% if review.score_class == "good" %}Ready to send after a last read.{% elif review.score_class == "ok" %}Fix a few things first.{% else %}Needs real work.{% endif %}
+  </p>
+  {% else %}
+  <div class="score-badge big none" id="score-badge"><strong>-</strong><span>not scored</span></div>
+  {% endif %}
+</section>
+
+{% call card("Quick checks (Python, free)") %}
+  {% if review.prechecks %}
+  <ul class="findings" id="prechecks">
+    {% for f in review.prechecks %}
+    <li class="finding {{ f.severity }}">{{ pill({"error": "Fix", "warn": "Check", "info": "Note"}.get(f.severity, f.severity), {"error": "bad", "warn": "warn", "info": ""}.get(f.severity, "")) }} <span>{{ f.message }}</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted" id="prechecks">No spelling, spacing, length or rate problems found.</p>{% endif %}
+{% endcall %}
+
+{% if review.score is not none %}
+{% call card("Main issues") %}
+  {% if review.result.issues %}
+  <ol class="issues" id="issues">
+    {% for i in review.result.issues %}
+    <li><strong>{{ i.check }}</strong><br>{{ i.problem }}<br><span class="fix"><strong>Fix:</strong> {{ i.fix }}</span></li>
+    {% endfor %}
+  </ol>
+  {% else %}<p class="muted" id="issues">No issues found.</p>{% endif %}
+{% endcall %}
+
+{% call card("Job instructions, first lines and proof") %}
+  <div class="compare">
+    <div>
+      <h3>Instructions found in the job post</h3>
+      {% if review.result.instructions_found %}
+      <ul class="plain-list" id="instructions-found">{% for x in review.result.instructions_found %}<li>{{ x }}</li>{% endfor %}</ul>
+      {% else %}<p class="muted" id="instructions-found">None found.</p>{% endif %}
+    </div>
+    <div>
+      <h3>Instructions missed</h3>
+      {% if review.result.instructions_missed %}
+      <ul class="plain-list" id="instructions-missed">{% for x in review.result.instructions_missed %}<li>{{ x }}</li>{% endfor %}</ul>
+      {% else %}<p class="muted" id="instructions-missed">None missed.</p>{% endif %}
+    </div>
+  </div>
+  <p id="first-lines">First two lines speak to the client's problem:
+    {% if review.result.first_two_lines_ok is true %}{{ pill("Yes", "ok") }}{% elif review.result.first_two_lines_ok is false %}{{ pill("No", "bad") }}{% else %}<span class="muted">not judged</span>{% endif %}</p>
+  <p id="proof">One real proof:
+    {% if review.result.proof_found %}{{ pill("Found", "ok") }} {{ review.result.proof_found }}{% else %}{{ pill("Missing", "warn") }}{% endif %}</p>
+{% endcall %}
+
+{% if review.fixed %}
+{% call card("Cover letter: your draft and the fixed version") %}
+  <p class="muted small">Removed words are <del>struck through</del> on the left. Added words are <ins>underlined</ins> on the right.</p>
+  <div class="compare diff-compare">
+    <div>
+      <h3>Your draft</h3>
+      <div class="difftext" id="original-cover">{{ review.cover_left }}</div>
+    </div>
+    <div>
+      <h3>Fixed version</h3>
+      <div class="difftext" id="fixed-cover">{{ review.cover_right }}</div>
+      <div class="actions">{{ copy_button("fixed-cover", "Copy fixed cover letter") }}</div>
+    </div>
+  </div>
+{% endcall %}
+{% endif %}
+{% endif %}
+
+{% if review.answer_rows %}
+{% call card("Screening answers") %}
+  {% for a in review.answer_rows %}
+  <div class="answer-block" id="answer-{{ a.n }}">
+    <h3>Answer {{ a.n }}{% if a.question %}: {{ a.question }}{% endif %}</h3>
+    {% if review.fixed %}
+    <div class="compare diff-compare">
+      <div><h4>Your draft</h4><div class="difftext" id="original-answer-{{ a.n }}">{{ a.left }}</div></div>
+      <div><h4>Fixed version</h4><div class="difftext" id="fixed-answer-{{ a.n }}">{{ a.right }}</div>
+        <div class="actions">{{ copy_button("fixed-answer-" ~ a.n, "Copy answer " ~ a.n) }}</div></div>
+    </div>
+    {% else %}
+    <div class="difftext" id="original-answer-{{ a.n }}">{{ a.original }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+{% endcall %}
+{% endif %}
+
+{% if not review.fixed %}
+{% call card("Your draft") %}
+  <div class="difftext" id="original-cover">{{ review.original.cover_letter }}</div>
+{% endcall %}
+{% endif %}
+{% endblock %}

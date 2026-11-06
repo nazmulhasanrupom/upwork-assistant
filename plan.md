@@ -244,3 +244,8 @@ L5. Weekly research (SPEC2 §6): Claude run with WebSearch/WebFetch only (no Upw
 - D9 (before O3): Auto-apply list. Upwork's tool says every write needs the user's real "yes" and "always allow" does not skip the preview step (SPEC 3.4). Options: (a) no auto-apply: every profile write is one click (safe, matches Upwork's stated rule); (b) auto-apply only the SPEC2 auto list. Manager recommends (a), with a "approve all small changes" batch button.
 - D10 (KW1): user approves the 3 to 5 keywords.
 - D11 (L5): OK to let a Claude run use web search weekly (small cost).
+
+## Status 2026-11-06 13:25 (manager)
+DONE and pushed: A–E, U, P1–P5, T1, I4 (scheduler), M1–M2 (Gmail), HR1, G0–G4, J2a (/context USER.md). Live: Upwork login works from the panel.
+NEXT: R1+R2 (builder), then manager captures real samples for R3/X (list_freelancer_proposals list/get/invitations, get_freelancer_dashboard, find_freelancers search) via the bridge or the claude.ai Upwork connector, then R3, X, H, KW, O, L, I, J, K.
+Open human items: Gmail live test; build USER.md from /context and click "Use this"; D9/D10/D11 later.

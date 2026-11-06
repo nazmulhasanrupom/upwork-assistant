@@ -200,6 +200,7 @@ input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); ou
 }
 .pill.ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-line); }
 .pill.warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-line); }
+.pill.bad { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-line); }
 
 .chips { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
@@ -393,3 +394,37 @@ pre.logview {
 .table td.err { max-width: 24rem; overflow-wrap: anywhere; color: var(--bad-fg); font-size: 0.875rem; }
 #runs-table td, #runs-table th { vertical-align: top; }
 #runs-table td:nth-child(2), #runs-table td:nth-child(3), #runs-table td:last-child { white-space: nowrap; }
+
+/* Proposal reviewer (plan R2) */
+.score-row { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); flex-wrap: wrap; }
+.score-text { margin: 0; }
+.score-badge {
+  display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700;
+  font-variant-numeric: tabular-nums; border: 1px solid var(--border-strong);
+  background: var(--low-bg); color: var(--low-fg);
+}
+.score-badge.good { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-line); }
+.score-badge.ok { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-line); }
+.score-badge.bad { background: var(--bad-bg); color: var(--bad-fg); border-color: var(--bad-line); }
+.score-badge.big {
+  display: inline-flex; align-items: baseline; gap: 6px; padding: 10px 24px; border-radius: var(--radius);
+  font-size: 1rem;
+}
+.score-badge.big strong { font-size: 2.5rem; line-height: 1; }
+.findings, .issues { margin: 0; padding: 0; }
+.findings { list-style: none; display: flex; flex-direction: column; gap: var(--s1); }
+.finding .pill { flex: none; white-space: nowrap; }
+.finding { display: flex; gap: var(--s1); align-items: baseline; overflow-wrap: anywhere; }
+.issues { padding-left: var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
+.issues .fix { color: var(--muted); }
+.difftext {
+  white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--s2); line-height: 1.55;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+  min-height: 3rem;
+}
+.difftext ins { background: var(--ok-bg); color: var(--ok-fg); text-decoration: underline; border-radius: 3px; }
+.difftext del { background: var(--bad-bg); color: var(--bad-fg); text-decoration: line-through; border-radius: 3px; }
+.answer-block + .answer-block { margin-top: var(--s3); padding-top: var(--s2); border-top: 1px solid var(--border); }
+.answer-block h3 { margin: 0 0 var(--s1); font-size: 1rem; }
+.answer-block h4 { margin: 0 0 var(--s1); font-size: 0.875rem; color: var(--muted); }
+.diff-compare h3 { font-size: 0.9375rem; color: var(--muted); }

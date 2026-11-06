@@ -17,6 +17,7 @@ from app.db import init_db
 from app.gmail_routes import router as gmail_router
 from app.pages import install_filters
 from app.pages import router as pages_router
+from app.review.routes import router as review_router
 from app.runs_routes import router as runs_router
 from app.settings import Settings
 from app.upwork.routes import router as upwork_router
@@ -72,6 +73,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(gmail_router)
     app.include_router(context_router)
     app.include_router(runs_router)
+    app.include_router(review_router)
     app.include_router(pages_router)
 
     @app.get("/healthz")

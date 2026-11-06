@@ -22,6 +22,7 @@
       <nav aria-label="Main">
         {{ nav_link("/", "Dashboard", path == "/") }}
         {{ nav_link("/jobs", "Jobs", path.startswith("/jobs")) }}
+        {{ nav_link("/review", "Review", path.startswith("/review")) }}
         {{ nav_link("/runs", "Runs", path.startswith("/runs")) }}
         {{ nav_link("/context", "Profile", path.startswith("/context")) }}
         {{ nav_link("/upwork", "Upwork", path.startswith("/upwork")) }}

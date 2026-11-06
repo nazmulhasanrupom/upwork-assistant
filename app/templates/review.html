@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, flash, card %}
+{% block title %}Review a proposal{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Review a proposal</h1>
+  <p class="muted">Paste your draft before you send it. Python checks the spelling and spacing for free, then one Claude call checks the job's own instructions, your first two lines, your proof and your answers, and writes a fixed version. Nothing is sent to Upwork.</p>
+</div>
+{% if error %}{{ flash("error", error) }}{% endif %}
+
+{% call card("1. Which job?") %}
+  <form method="get" action="/review" class="filters" id="job-picker">
+    <label class="field"><span>Stored job <span class="hint">newest first. Leave empty to paste the job text below.</span></span>
+      <select name="job_id" id="job-select">
+        <option value="">Paste job text instead</option>
+        {% for j in jobs %}<option value="{{ j.job_id }}"{% if j.job_id == job_id %} selected{% endif %}>{{ (j.title or j.job_id)[:90] }}{% if j.tier %} [{{ j.tier }}]{% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="filter-actions">{{ button("Load this job", "secondary") }}</div>
+  </form>
+  {% if job_id %}<p class="muted small" id="job-chosen">Using the stored job: <strong>{{ job_title }}</strong>{% if budget and (budget.min is not none or budget.max is not none) %}. Budget {{ budget.min if budget.min is not none else "?" }} to {{ budget.max if budget.max is not none else "?" }}{% endif %}.</p>{% endif %}
+{% endcall %}
+
+<form method="post" action="/review" class="stack" id="review-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="job_id" value="{{ job_id }}">
+  {% if not job_id %}
+  {% call card("2. Job text") %}
+    <label class="field"><span>Job post <span class="hint">Paste the whole post, including the screening questions.</span></span>
+      <textarea name="job_text" rows="8" id="job-text" maxlength="{{ input_max }}">{{ job_text }}</textarea></label>
+  {% endcall %}
+  {% endif %}
+  {% call card("3. Your draft") %}
+    <label class="field"><span>Cover letter</span>
+      <textarea name="cover_letter" rows="12" id="cover-letter" maxlength="{{ input_max }}" required>{{ cover_letter }}</textarea></label>
+    {% if questions %}
+      {% for q in questions %}
+      <label class="field"><span>Answer {{ loop.index }}: {{ q }}</span>
+        <textarea name="answer_{{ loop.index0 }}" rows="4" id="answer-{{ loop.index0 }}" maxlength="{{ input_max }}">{{ answers[loop.index0] }}</textarea></label>
+      {% endfor %}
+    {% else %}
+      <label class="field"><span>Screening answers <span class="hint">Optional. Paste each question with your answer.</span></span>
+        <textarea name="answers_free" rows="5" id="answers-free" maxlength="{{ input_max }}">{{ answers_free }}</textarea></label>
+    {% endif %}
+    <label class="field"><span>My rate <span class="hint">For example 35 (per hour) or your fixed bid.</span></span>
+      <input type="text" name="rate" id="rate" value="{{ rate }}" maxlength="40" inputmode="decimal"></label>
+  {% endcall %}
+  <div class="actions">{{ button("Review my proposal", "primary") }}</div>
+</form>
+
+{% call card("Past reviews") %}
+  {% if history %}
+  <div class="table-wrap">
+  <table class="table" id="review-history">
+    <thead><tr><th scope="col">When</th><th scope="col">Job</th><th scope="col" class="num">Score</th><th scope="col" class="num">Checks to fix</th><th scope="col" class="num">Cost</th><th scope="col"></th></tr></thead>
+    <tbody>
+    {% for h in history %}
+    <tr>
+      <td>{{ h.created_at | dt }}</td>
+      <td>{{ h.title or "(no title)" }}</td>
+      <td class="num">{% if h.score is not none %}<span class="score-badge {{ h.score_class }}">{{ h.score }}</span>{% else %}<span class="muted">not scored</span>{% endif %}</td>
+      <td class="num">{{ h.problems }}</td>
+      <td class="cost">${{ "%.4f"|format(h.cost) }}</td>
+      <td><a href="/review/{{ h.id }}">Open</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="muted">No reviews yet.</p>{% endif %}
+{% endcall %}
+{% endblock %}
