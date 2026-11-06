@@ -633,7 +633,8 @@ def test_dashboard_empty_states(web):
     _, client = web
     html = client.get("/").text
     assert 'id="funnel-chart"' in html and "No proposals stored" in html
-    assert "<svg" not in html.split("<main", 1)[1]  # no chart drawn (nav icons are outside main)
+    main = re.sub(r'<svg class="icon".*?</svg>', "", html.split("<main", 1)[1], flags=re.S)
+    assert "<svg" not in main  # no chart drawn (icons are not charts)
     assert 'id="rank-charts"' in html and html.count("No checks in this period yet") == 2
 
 
@@ -705,12 +706,12 @@ def test_no_pill_when_the_balance_is_enough(web, config):
 def test_filter_hides_unaffordable_jobs(web, config):
     app, client = web
     run_jobs(app, config, balance=5)
-    all_cards = client.get("/jobs?afford=show").text.count('class="card"')
+    all_cards = client.get("/jobs?afford=show").text.count("<tr data-href=")
     shown = pills(client.get("/jobs?afford=show").text)
     assert shown > 0
     hidden = client.get("/jobs?afford=hide").text
     assert pills(hidden) == 0
-    assert hidden.count('class="card"') == all_cards - shown
+    assert hidden.count("<tr data-href=") == all_cards - shown
 
 
 def test_setting_hides_by_default_and_the_url_overrides_it(web, config):
@@ -751,4 +752,4 @@ def test_unknown_balance_never_hides_and_has_no_pill(web, config):
     app.state.db.execute("DELETE FROM connects")
     app.state.settings.set("ui.hide_unaffordable", True)
     html = client.get("/jobs").text
-    assert pills(html) == 0 and html.count('class="card"') > 0
+    assert pills(html) == 0 and html.count("<tr data-href=") > 0

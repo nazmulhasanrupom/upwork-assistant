@@ -1,13 +1,9 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, pill %}
+{% from "_macros.html" import button, flash, card, pill, page_header %}
 {% block title %}Email{% endblock %}
 {% block main_class %}medium{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Email</h1>
-  <p class="muted">The app can email you about new top jobs and problems. It sends through your
-    own Gmail account, using a Google app you create once.</p>
-</div>
+{% call page_header("Email", "email.intro") %}{% endcall %}
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 {% if expired and not connected %}{{ flash("warn", "Gmail login expired. Connect Gmail again.") }}{% endif %}
@@ -41,7 +37,7 @@
   {% endif %}
 {% endcall %}
 
-{% call card("Google app") %}
+{% call card("Google app", help_key="email.google_app") %}
   <p>Redirect address to paste into Google Cloud (Authorized redirect URIs):</p>
   {% if redirect_uri %}
   <div class="copy-row">
@@ -57,8 +53,7 @@
     });
   </script>
   {% else %}
-  <p class="muted">PUBLIC_BASE_URL is not set, so the address is not known yet.
-    Set it to your public HTTPS address and restart.</p>
+  {{ flash("warn", "PUBLIC_BASE_URL is not set, so the address is not known yet. Set it to your public HTTPS address and restart.") }}
   {% endif %}
 
   <h3 class="step-title">Set up once</h3>

@@ -1,16 +1,14 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, job_card, info %}
+{% from "_macros.html" import button, badge, pill, empty, page_header, jobs_tabs, icon %}
 {% block title %}Jobs{% endblock %}
 {% block content %}
-{% from "_macros.html" import jobs_tabs as _tabs %}
-<div class="page-head">
-  <h1>Jobs{{ info("jobs.score") }}</h1>
-  <p class="muted">{{ total }} job(s). Page {{ page }} of {{ pages }}.</p>
-</div>
-{{ _tabs("/jobs") }}
+{% call page_header("Jobs", "jobs.score") %}
+  <span class="muted small" id="jobs-count">{{ total }} job(s) &middot; Page {{ page }} of {{ pages }}</span>
+{% endcall %}
+{{ jobs_tabs("/jobs") }}
 
-<form method="get" action="/jobs" class="filters">
-  <label class="field"><span>Tier</span>
+<form method="get" action="/jobs" class="filters filter-bar" id="jobs-filters" role="search">
+  <label class="field"><span>Fit</span>
     <select name="tier">
       <option value="">all</option>
       {% for t in tiers %}<option value="{{ t }}"{% if t == f_tier %} selected{% endif %}>{{ t }}</option>{% endfor %}
@@ -30,23 +28,55 @@
       <option value="hide"{% if f_afford == "hide" %} selected{% endif %}>hide</option>
     </select>
   </label>
-  <label class="field"><span>From</span><input type="date" name="date_from" value="{{ f_from }}"></label>
-  <label class="field"><span>To</span><input type="date" name="date_to" value="{{ f_to }}"></label>
+  <label class="field field-search"><span>Search</span>
+    <input type="search" name="q" value="{{ f_q }}" maxlength="100" placeholder="Title">
+  </label>
   <div class="filter-actions">
     {{ button("Filter", "primary") }}
-    {{ button("Clear", "secondary", href="/jobs") }}
+    {{ button("Clear", "ghost", href="/jobs") }}
   </div>
+  <details class="filter-more"{% if f_from or f_to %} open{% endif %}>
+    <summary>Dates</summary>
+    <div class="filter-dates">
+      <label class="field"><span>From</span><input type="date" name="date_from" value="{{ f_from }}"></label>
+      <label class="field"><span>To</span><input type="date" name="date_to" value="{{ f_to }}"></label>
+    </div>
+  </details>
 </form>
 
 {% if cards %}
-<ul class="grid">
-  {% for j in cards %}{{ job_card(j) }}{% endfor %}
-</ul>
-{% else %}
-<div class="empty">
-  <p><strong>No jobs match.</strong></p>
-  <p class="muted">Try other filters, or wait for the next daily run to find jobs.</p>
+<div class="table-wrap">
+<table class="table jobs-table" id="jobs-table">
+  <thead><tr>
+    <th scope="col">Fit</th><th scope="col">Title</th><th scope="col">Budget</th>
+    <th scope="col">Client</th><th scope="col">Posted</th><th scope="col" class="num">Score</th>
+  </tr></thead>
+  <tbody>
+  {% for j in cards %}
+  <tr data-href="/jobs/{{ j.job_id }}" id="job-{{ j.job_id }}">
+    <td>{% if j.tier %}{{ badge(j.tier, j.tier_estimated) }}{% else %}<span class="muted">-</span>{% endif %}</td>
+    <td class="job-title-cell">
+      <a href="/jobs/{{ j.job_id }}">{{ j.title or j.job_id }}</a>
+      <div class="row-sub">
+        {% if j.status != "candidate" %}{{ pill(j.status, "status-pill") }}{% endif %}
+        {% if j.has_draft %}{{ pill("Draft ready", "ok") }}{% endif %}
+        {% if j.can_afford is false %}<span class="pill warn cant-afford"{% if j.connects_cost is not none and j.connects_balance is not none %} title="Costs {{ j.connects_cost }} Connects, you have {{ j.connects_balance }}"{% endif %}>Can't afford</span>{% endif %}
+        {% if j.drop_reason %}<span class="muted small">Dropped: {{ j.drop_reason }}</span>{% endif %}
+        {% if j.flags %}<span class="muted small row-flags" title="{{ j.flags | join('; ') }}">{{ j.flags | join("; ") }}</span>{% endif %}
+      </div>
+    </td>
+    <td>{{ j | budget }}{% if j.rate_paid %}<div class="muted small">{{ j.rate_paid | rate }} paid</div>{% endif %}</td>
+    <td>{% if j.client_rating is not none %}<span class="stars" aria-label="Rating {{ j.client_rating }} of 5">&#9733; {{ "%.1f"|format(j.client_rating) }}</span>{% else %}<span class="muted">no rating</span>{% endif %}
+      <div class="muted small">{{ (j.client_spend | money) or "n/a" }} spent</div></td>
+    <td class="nowrap"><time>{{ j.first_seen | dt }}</time></td>
+    <td class="num">{% if j.fit_score is not none %}<strong>{{ j.fit_score }}</strong>{% else %}<span class="muted">-</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
 </div>
+{% else %}
+{{ empty("briefcase", "No jobs match.", "Clear filters", "/jobs") }}
 {% endif %}
 
 {% if prev_url or next_url %}

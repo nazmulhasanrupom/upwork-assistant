@@ -1,11 +1,9 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, pill %}
+{% from "_macros.html" import button, flash, card, pill, page_header, info %}
 {% block title %}Upwork connection{% endblock %}
 {% block main_class %}medium{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Upwork connection</h1>
-</div>
+{% call page_header("Upwork connection", "upwork.intro") %}{% endcall %}
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 
@@ -20,9 +18,7 @@
     {% else %}{{ pill("Not checked yet") }}
       <span class="muted small">Press Test connection to check.</span>{% endif %}
   </p>
-  <p>Upwork is reached through Claude Code. A small, cheap model ({{ model }}) makes read-only
-    Upwork calls for this app and the app reads the raw answers. Nothing is changed on Upwork
-    from this page.</p>
+  <p class="muted small">Read-only: nothing is changed on Upwork from this page. Model: <code>{{ model }}</code></p>
 
   {% if login %}
   <div class="login-flow" id="login-flow">
@@ -64,13 +60,12 @@
   </dl>
 {% endcall %}
 
-{% call card("Freelancer account") %}
+{% call card("Freelancer account", help_key="upwork.account") %}
   {% if account %}
   <p>In use: <strong>{{ account.name or "(no name)" }}</strong> {{ pill("Freelancer", "ok") }}
     <br><span class="muted small">Account id <code>{{ account.org_uid }}</code></span></p>
   {% else %}
-  <p class="muted">No freelancer account is selected yet. Press "Test connection" to look for it.
-    Only your freelancer (TALENT) account is used; client and agency accounts are ignored.</p>
+  <p class="muted">No freelancer account is selected yet. Press "Test connection" to look for it.</p>
   {% endif %}
   {% if candidates %}
   <form method="post" action="/upwork/account" class="stack">
@@ -89,9 +84,7 @@
 {% call card("") %}
 <details class="advanced" id="advanced-import">
   <summary>Advanced: import a login file</summary>
-  <h3 class="step-title">How to log in from your own computer</h3>
-    <p>The Upwork login lives in Claude Code, inside this app's container. Do this once on your
-      own computer, and again if the login expires:</p>
+  <h3 class="step-title">How to log in from your own computer{{ info("upwork.import") }}</h3>
     <ol id="login-steps" class="steps">
       <li>Install Claude Code, then run these commands in a terminal:
         <pre class="text" id="login-commands">{{ login_commands }}</pre></li>
@@ -102,12 +95,10 @@
         "Import Claude login" box below.</li>
       <li>Press <strong>Test connection</strong>.</li>
     </ol>
-    <p class="muted small">That file holds a login token. After the import you can delete it from
-      your computer (and the <code>upwork-claude-test</code> folder) if you want.</p>
+    <p class="muted small">That file holds a login token. You can delete it from your computer after the import.</p>
 
   <h3 class="step-title">Import Claude login</h3>
-    <p>Upload the login file you made on your own computer (steps above). The app keeps only the
-      Upwork part of it and stores it privately in the container. Max {{ max_upload_kb }} KB.</p>
+    <p class="muted small">Max {{ max_upload_kb }} KB.</p>
     <form method="post" action="/upwork/import" enctype="multipart/form-data" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>File <code>.credentials.json</code>

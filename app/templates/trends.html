@@ -1,16 +1,12 @@
 {% extends "base.html" %}
-{% from "_macros.html" import flash %}
+{% from "_macros.html" import info, page_header, growth_tabs, card, empty %}
 {% block title %}Trends{% endblock %}
 {% block content %}
-{% from "_macros.html" import growth_tabs as _tabs %}
-<div class="page-head">
-  <h1>Trends</h1>
-  <p class="muted">Counted by Python from every job the daily run saw, also the ones it dropped. No Claude cost. The weekly task reads these numbers.</p>
-</div>
-{{ _tabs("/trends") }}
+{{ page_header("Trends", "trends.intro") }}
+{{ growth_tabs("/trends") }}
 
 <section aria-labelledby="tr-skills">
-  <h2 id="tr-skills">Skills in demand</h2>
+  <h2 id="tr-skills">Skills in demand{{ info("trends.skills") }}</h2>
   {% if skills_chart %}
   <div id="trends-skills">{{ skills_chart }}</div>
   {% else %}
@@ -19,14 +15,13 @@
 </section>
 
 <section aria-labelledby="tr-budget">
-  <h2 id="tr-budget">Median budget</h2>
-  <p class="muted small">Fixed price and hourly are kept apart. A week with too few jobs that show a budget has no point.</p>
+  <h2 id="tr-budget">Median budget{{ info("trends.budget") }}</h2>
   {% if fixed_chart %}<div id="trends-fixed">{{ fixed_chart }}</div>{% else %}<p class="muted">No fixed-price budgets yet.</p>{% endif %}
   {% if hourly_chart %}<div id="trends-hourly">{{ hourly_chart }}</div>{% else %}<p class="muted">No hourly rates yet.</p>{% endif %}
 </section>
 
 <section aria-labelledby="tr-week">
-  <h2 id="tr-week">Last 7 days against the 7 days before</h2>
+  <h2 id="tr-week">Last 7 days against the 7 days before{{ info("trends.week") }}</h2>
   <p class="muted small">{{ comparison.jobs }} jobs seen ({{ comparison.jobs_before }} the week before).</p>
   {% if comparison.skills %}
   <div class="table-wrap">

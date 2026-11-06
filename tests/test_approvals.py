@@ -159,7 +159,7 @@ def test_expired_previews_are_hidden(web):
     add_preview(conn, "4000000000000000003", status="confirmed", confirmed=True)
     r = client.get("/approvals")
     assert not any(f"Job title {n}" in r.text for n in "123")
-    assert "No proposal preview is waiting" in r.text
+    assert "Nothing is waiting for you" in r.text
     assert approvals.pending_count(conn, app.state.settings) == 0
 
 
@@ -215,7 +215,7 @@ def test_approve_records_decision(web):
     assert got["status"] == "approved" and got["decided_at"]
     page = client.get(r.headers["location"])
     assert "Approved. The decision is recorded." in page.text
-    assert "Recently decided" in page.text and "No other change is waiting" in page.text
+    assert "Recently decided" in page.text and "Nothing is waiting for you" in page.text
 
 
 def test_reject_records_decision(web):

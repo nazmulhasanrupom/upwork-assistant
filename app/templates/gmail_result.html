@@ -1,11 +1,9 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card %}
+{% from "_macros.html" import button, flash, card, page_header %}
 {% block title %}Gmail{% endblock %}
 {% block main_class %}medium{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Gmail</h1>
-</div>
+{% call page_header("Gmail", "gmail.result") %}{% endcall %}
 {% if ok %}
   {{ flash("ok", "Gmail is connected" ~ (" as " ~ address if address else "") ~ ".") }}
 {% else %}

@@ -1,23 +1,29 @@
 {% extends "base.html" %}
-{% from "_macros.html" import flash, pill %}
+{% from "_macros.html" import flash, pill, page_header, card, growth_tabs, empty %}
 {% block title %}Playbook{% endblock %}
 {% block content %}
-{% from "_macros.html" import growth_tabs as _tabs %}
-<div class="page-head">
-  <h1>Playbook and tests</h1>
-  <p class="muted">What to try on your Upwork profile, one change at a time. A test runs {{ test_days }} days and is judged with 7-day averages. This page only shows the state: it changes nothing on Upwork.</p>
-</div>
-{{ _tabs("/playbook") }}
+{% call page_header("Playbook", "playbook.intro") %}
+  <span class="muted small">A test runs {{ test_days }} days</span>
+{% endcall %}
+{{ growth_tabs("/playbook") }}
 
 <section aria-labelledby="pb-state">
   <h2 id="pb-state">Test status</h2>
   {% if active %}
-    {{ flash("ok", "A test is running: " ~ active.tactic ~ " (started " ~ active.started ~ ", judged on " ~ active.ends ~ ").") }}
-  {% endif %}
-  {% if blocked %}
-    {{ flash("error" if not active else "info", "No new test can start. " ~ blocked) }}
+  {% call card("A test is running", "panel active-test") %}
+    <p class="test-tactic"><strong>{{ active.tactic }}</strong></p>
+    {% if days_left is not none %}
+    <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="{{ test_days }}" aria-valuenow="{{ test_days - days_left if test_days >= days_left else 0 }}" aria-label="Test progress"><span style="width: {{ ((test_days - days_left) * 100 / test_days) | round | int if test_days else 0 }}%"></span></div>
+    {% endif %}
+    <p class="muted small">Started {{ active.started }}, judged on {{ active.ends }}{% if days_left is not none %}. {{ days_left }} day(s) left{% endif %}.</p>
+    {% if blocked %}<p>{{ pill("No new test can start", "warn") }} <span class="muted small">{{ blocked }}</span></p>{% endif %}
+  {% endcall %}
   {% else %}
+    {% if blocked %}
+    {{ flash("error", "No new test can start. " ~ blocked) }}
+    {% else %}
     {{ flash("ok", "A new test can start.") }}
+    {% endif %}
   {% endif %}
 </section>
 
@@ -32,7 +38,7 @@
       <td class="num">{{ t.no }}</td>
       <th scope="row">{{ t.tactic }}</th>
       <td>{{ t.type }}</td>
-      <td>{{ pill(t.status, "good" if t.status in ("worked", "always on") else ("warn" if t.status == "testing" else ("bad" if t.status == "hurt" else ""))) }}</td>
+      <td>{{ pill(t.status, "ok" if t.status in ("worked", "always on") else ("warn" if t.status == "testing" else ("bad" if t.status == "hurt" else ""))) }}</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -52,7 +58,7 @@
       <th scope="row">{% if e.tactic_no is not none %}#{{ e.tactic_no }} {% endif %}{{ e.tactic }}</th>
       <td>{{ e.started }}</td>
       <td>{{ e.ends }}</td>
-      <td>{{ pill(e.outcome or "running", "good" if e.outcome == "worked" else ("bad" if e.outcome == "hurt" else ("warn" if not e.outcome else ""))) }}</td>
+      <td>{{ pill(e.outcome or "running", "ok" if e.outcome == "worked" else ("bad" if e.outcome == "hurt" else ("warn" if not e.outcome else ""))) }}</td>
       <td class="small">
         {% for k, v in (e.baseline.metrics or {}).items() %}{{ k }} {{ "%.1f" | format(v) if v is not none else "n/a" }}{% if not loop.last %}, {% endif %}{% endfor %}
         {% if e.baseline.rank %}<br>{% for k, v in e.baseline.rank.items() %}{{ k }} {{ "%.1f" | format(v) if v is not none else "n/a" }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
@@ -64,7 +70,7 @@
   </table>
   </div>
   {% else %}
-  <p class="muted">No test yet.</p>
+  {{ empty("trending-up", "No test yet.") }}
   {% endif %}
 </section>
 {% endblock %}

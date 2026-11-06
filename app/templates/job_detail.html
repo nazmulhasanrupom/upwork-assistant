@@ -1,14 +1,18 @@
 {% extends "base.html" %}
-{% from "_macros.html" import badge, pill, chips, button, card, flash, copy_button %}
+{% from "_macros.html" import badge, pill, chips, button, card, flash, copy_button, info, icon %}
 {% block title %}{{ job.title or job.job_id }}{% endblock %}
+{# A write button in its own form. Why it is off goes in the "i" next to it (not a tooltip on a disabled button, which never gets hover). #}
 {% macro act_form(path, label, kind="primary", reason="", fid="") %}
 <form method="post" action="/jobs/{{ job.job_id }}/{{ path }}" class="inline-form"{% if fid %} id="{{ fid }}"{% endif %}>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {{ caller() if caller else "" }}
   <button class="btn btn-{{ kind }}" type="submit"{% if reason %} disabled aria-disabled="true"{% endif %}>{{ label }}</button>
-  {% if reason %}<span class="muted small why-disabled">{{ reason }}</span>{% endif %}
+  {% if reason %}{{ why_off(reason, fid or path) }}{% endif %}
 </form>
 {% endmacro %}
+{% macro why_off(reason, key) -%}
+<span class="info-wrap why-off"><button type="button" class="info" aria-label="Why is this off?" aria-describedby="why-{{ key }}">i</button><span role="tooltip" id="why-{{ key }}">{{ reason }}</span></span>
+{%- endmacro %}
 {% block content %}
 <p class="back"><a href="/jobs">&larr; Jobs</a></p>
 
@@ -17,10 +21,11 @@
     <div class="badges">
       {% if job.tier %}{{ badge(job.tier, job.tier_estimated) }}{% endif %}
       {{ pill(job.status, "status-pill") }}
+      {% if judgement and judgement.fit_score is not none %}{{ pill("Score " ~ judgement.fit_score, "ok" if judgement.fit_score >= 70 else "") }}{% endif %}
     </div>
     <h1>{{ job.title or job.job_id }}</h1>
   </div>
-  {% if link %}<div class="detail-actions">{{ button("Open on Upwork", "primary", href=link, external=true) }}</div>{% endif %}
+  {% if link %}<div class="detail-actions">{{ button("Open on Upwork", "secondary", href=link, external=true, icon_name="external-link") }}</div>{% endif %}
 </header>
 
 {% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
@@ -30,20 +35,53 @@
     {% if job.drop_reason %}{{ flash("info", "Dropped: " ~ job.drop_reason) }}{% endif %}
     {{ chips(flags) }}
 
+    <div class="facts-cols">
+      {% call card("Job") %}
+      <dl class="kv">
+        <div><dt>Budget</dt><dd>{{ job | budget }}
+          {% if job | budget_note %}<small class="muted">({{ job | budget_note }})</small>{% endif %}</dd></div>
+        <div><dt>Rate paid</dt><dd>{{ (job.rate_paid | rate) or "n/a" }}</dd></div>
+        <div><dt>Type</dt><dd>{{ job.job_type or "n/a" }}</dd></div>
+        <div><dt>Proposals</dt><dd>{{ job.proposals_tier or "n/a" }}</dd></div>
+        {% if details.experience_level %}<div><dt>Experience</dt><dd>{{ details.experience_level }}</dd></div>{% endif %}
+        {% if details.duration %}<div><dt>Duration</dt><dd>{{ details.duration }}</dd></div>{% endif %}
+        {% if details.skills %}<div><dt>Skills</dt><dd>{{ details.skills | join(", ") }}</dd></div>{% endif %}
+        <div><dt>Posted</dt><dd>{{ job.first_seen | dt }}</dd></div>
+        <div><dt>Job ID</dt><dd><code class="wrap">{{ job.job_id }}</code></dd></div>
+      </dl>
+      {% endcall %}
+
+      {% call card("Client") %}
+      <dl class="kv">
+        <div><dt>Rating</dt><dd>{% if job.client_rating is not none %}<span class="stars">&#9733; {{ "%.1f"|format(job.client_rating) }}</span>{% if job.client_reviews is not none %} <small class="muted">({{ job.client_reviews }} reviews)</small>{% endif %}{% else %}n/a{% endif %}</dd></div>
+        <div><dt>Spent</dt><dd>{{ (job.client_spend | money) or "n/a" }}</dd></div>
+        <div><dt>Hours</dt><dd>{{ job.client_hours if job.client_hours is not none else "n/a" }}</dd></div>
+        <div><dt>Hires</dt><dd>{{ job.client_hires if job.client_hires is not none else "n/a" }}</dd></div>
+        {% if details.client_country %}<div><dt>Country</dt><dd>{{ details.client_country }}</dd></div>{% endif %}
+        {% if details.hire_rate is not none and details.hire_rate is defined %}<div><dt>Hire rate</dt><dd>{{ details.hire_rate }}%</dd></div>{% endif %}
+      </dl>
+      {% endcall %}
+    </div>
+
+    {% if details.description %}
+    {% call card("Job text") %}
+    {% set long = details.description.splitlines() | length > 8 or details.description | length > 700 %}
+    <div class="clamp-box">
+      {% if long %}<input type="checkbox" id="desc-toggle" class="clamp-toggle">{% endif %}
+      <pre class="text{% if long %} clamp-8{% endif %}" id="job-description">{{ details.description | untrusted }}</pre>
+      {% if long %}<label for="desc-toggle" class="clamp-label"><span class="more">Show all</span><span class="less">Show less</span></label>{% endif %}
+    </div>
+    {% endcall %}
+    {% endif %}
+
     {% if judgement %}
-    {% call card("Fit") %}
+    {% call card("Fit", help_key="job.fit") %}
     <p class="fit"><strong>Score {{ judgement.fit_score }} / 100</strong></p>
     {% if judgement.can_afford is false %}{{ flash("warn", "You can't afford this one yet: it costs " ~ judgement.plan_data.connects_cost ~ " Connects and you have " ~ judgement.plan_data.connects_balance ~ ".") }}{% endif %}
     {% if judgement.why %}<h3 class="sub">Why apply</h3><ul class="plain-list">{% for r in judgement.why %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
     {% if judgement.risk_list %}<h3 class="sub">Risks</h3><ul class="plain-list">{% for r in judgement.risk_list %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
-    {% if judgement.plan_data.proposal_plan %}<h3 class="sub">Plan</h3><p>{{ judgement.plan_data.proposal_plan }}</p>{% endif %}
+    {% if judgement.plan_data.proposal_plan %}<h3 class="sub">Plan</h3><div class="text-block">{{ judgement.plan_data.proposal_plan }}</div>{% endif %}
     {% if judgement.plan_data.instructions_in_post %}<h3 class="sub">Instructions in the post</h3><ul class="plain-list">{% for r in judgement.plan_data.instructions_in_post %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
-    {% endcall %}
-    {% endif %}
-
-    {% if details.description %}
-    {% call card("Job text") %}
-    <pre class="text">{{ details.description | untrusted }}</pre>
     {% endcall %}
     {% endif %}
 
@@ -58,23 +96,34 @@
     <ul class="plain-list">{% for r in details.reviews %}<li><strong>{{ r.score }}/5</strong> - {{ (r.comment | untrusted) or "(no comment)" }}</li>{% endfor %}</ul>
     {% endcall %}
     {% endif %}
+  </div>
 
-    {% call card("Draft") %}
-    {% if draft %}
+  <aside class="detail-side apply-side" aria-label="Apply">
+    {% set p = act.preview %}
+    {% call card("Apply", help_key="job.apply") %}
+    {% if act.dry_run %}{{ flash("info", "Dry-run is ON: Approve is logged and nothing is sent to Upwork.") }}{% endif %}
+    {% if act.kill_switch %}{{ flash("error", "The kill switch is on. Prepare, answer, re-make and Approve are off. Editing and skipping still work.") }}{% elif act.blocked %}{{ flash("info", act.blocked) }}{% endif %}
+
+    <h3 class="sub sub-first">Draft{{ info("job.draft") }}</h3>
+    {% if not draft %}
+    <div class="placeholder">{{ draft_note or "No draft yet." }}</div>
+    {% else %}
     {% for f in draft.flag_list %}{{ flash("warn", f) }}{% endfor %}
-    <div class="draft-head"><h3 class="sub">Cover letter <small class="muted">({{ draft.length }} / {{ max_letter }} characters)</small></h3>{{ copy_button("draft-cover") }}</div>
+
+    <div class="apply-scroll">
+    <div class="draft-head"><h4 class="sub">Cover letter <small class="muted">({{ draft.length }} / {{ max_letter }})</small></h4>{{ copy_button("draft-cover") }}</div>
     <pre class="text" id="draft-cover">{{ draft.cover_letter }}</pre>
     {% for a in draft.answer_list %}
-    <div class="draft-head"><h3 class="sub">Answer {{ loop.index }}</h3>{{ copy_button("draft-answer-" ~ loop.index) }}</div>
-    {% if a.question %}<p class="muted">{{ a.question | untrusted }}</p>{% endif %}
+    <div class="draft-head"><h4 class="sub">Answer {{ loop.index }}</h4>{{ copy_button("draft-answer-" ~ loop.index) }}</div>
+    {% if a.question %}<div class="muted small">{{ a.question | untrusted }}</div>{% endif %}
     <pre class="text" id="draft-answer-{{ loop.index }}">{{ a.answer }}</pre>
     {% endfor %}
-    {% if draft.material_list %}<h3 class="sub">Materials to attach</h3><ul class="plain-list">{% for m in draft.material_list %}<li>{{ m }}</li>{% endfor %}</ul>{% endif %}
+    {% if draft.material_list %}<h4 class="sub">Materials to attach</h4><ul class="plain-list">{% for m in draft.material_list %}<li>{{ m }}</li>{% endfor %}</ul>{% endif %}
     {% if draft.suggested_rate is not none %}
-    <div class="draft-head"><h3 class="sub">Suggested rate</h3>{{ copy_button("draft-rate") }}</div>
-    <p><strong id="draft-rate">{{ draft.suggested_rate | int if draft.suggested_rate == draft.suggested_rate | int else draft.suggested_rate }}</strong> <span class="muted">USD{% if job.job_type != "fixed" %} per hour{% endif %}</span></p>
+    <div class="draft-head"><h4 class="sub">Suggested rate</h4>{{ copy_button("draft-rate") }}</div>
+    <div><strong id="draft-rate">{{ draft.suggested_rate | int if draft.suggested_rate == draft.suggested_rate | int else draft.suggested_rate }}</strong> <span class="muted">USD{% if job.job_type != "fixed" %} per hour{% endif %}</span></div>
     {% endif %}
-    <p class="muted small">Made {{ draft.created_at | dt }}.{% if draft.edited_by_user %} Edited by you.{% endif %}</p>
+    <div class="muted small">Made {{ draft.created_at | dt }}.{% if draft.edited_by_user %} Edited by you.{% endif %}</div>
 
     <details class="advanced" id="edit-draft"{% if edit %} open{% endif %}>
       <summary>Edit draft</summary>
@@ -94,19 +143,10 @@
         </div>
       </form>
     </details>
-    {% else %}
-    <div class="placeholder">{{ draft_note or "No draft yet." }}</div>
-    {% endif %}
-    {% endcall %}
+    </div>
 
-    {% if draft %}
-    {% set p = act.preview %}
-    {% call card("Apply") %}
-    {% if act.dry_run %}{{ flash("info", "Dry-run is ON: Approve is logged and nothing is sent to Upwork.") }}{% endif %}
-    {% if act.kill_switch %}{{ flash("error", "The kill switch is on. Prepare, answer, re-make and Approve are off. Editing and skipping still work.") }}{% elif act.blocked %}{{ flash("info", act.blocked) }}{% endif %}
-
+    <h3 class="sub">Connects</h3>
     {% if p %}
-    <h3 class="sub">Preview {% if p.expired %}{{ pill("expired", "warn") }}{% elif p.confirmed %}{{ pill("sent", "ok") }}{% elif p.dry_run_blocked %}{{ pill("dry-run: not sent", "") }}{% elif p.status == "failed" %}{{ pill("failed", "bad") }}{% else %}{{ pill("ready", "ok") }}{% endif %}</h3>
     {% if p.kind == "accept_invitation" %}{{ flash("info", "This job has an invitation, so the preview accepts the invitation.") }}{% endif %}
     {% if p.status == "failed" and p.error %}{{ flash("error", p.error) }}{% endif %}
     {% if p.confirm_failed %}{{ flash("error", "The confirm step failed or was unclear. It is never retried by itself. Check Upwork, then Prepare again.") }}{% endif %}
@@ -118,26 +158,32 @@
       <div><dt>Connects balance</dt><dd>{{ p.connects_balance if p.connects_balance is not none else "n/a" }}</dd></div>
       <div><dt>Can afford</dt><dd>{% if p.can_afford is none %}n/a{% elif p.can_afford %}Yes{% else %}<strong>No</strong>{% endif %}</dd></div>
       {% if p.can_apply is false %}<div><dt>Upwork says</dt><dd>Cannot apply</dd></div>{% endif %}
-      <div><dt>Made</dt><dd>{{ p.created_at | dt }}</dd></div>
+      <div><dt>Preview</dt><dd>{% if p.expired %}{{ pill("expired", "warn") }}{% elif p.confirmed %}{{ pill("sent", "ok") }}{% elif p.dry_run_blocked %}{{ pill("dry-run: not sent", "") }}{% elif p.status == "failed" %}{{ pill("failed", "bad") }}{% else %}{{ pill("ready", "ok") }}{% endif %} <small class="muted">{{ p.created_at | dt }}</small></dd></div>
     </dl>
     {% if p.can_afford is false %}{{ flash("warn", "You can't afford this one: it costs " ~ p.connects_cost ~ " Connects and you have " ~ p.connects_balance ~ ".") }}{% endif %}
     {% if p.boost %}
-    <h3 class="sub">Boost</h3>
+    <h4 class="sub">Boost</h4>
     <div id="boost-block">
-      {% if p.boost.available is false %}<p class="muted">Boost is not available for this job.{% if p.boost.reason %} {{ p.boost.reason | untrusted }}{% endif %}</p>
-      {% else %}<p>Boost range: <strong>{{ p.boost_range[0] if p.boost_range[0] is not none else "?" }}</strong> to <strong>{{ p.boost_range[1] if p.boost_range[1] is not none else "?" }}</strong> Connects.{% if p.boost_chosen %} This preview includes a boost of {{ p.boost_chosen }}.{% endif %}</p>
-      {% if p.boost.recommendation %}<p class="muted small">{{ p.boost.recommendation | untrusted }}</p>{% endif %}
-      {% if p.boost.note %}<p class="muted small">{{ p.boost.note | untrusted }}</p>{% endif %}{% endif %}
+      {% if p.boost.available is false %}<div class="muted">Boost is not available for this job.{% if p.boost.reason %} {{ p.boost.reason | untrusted }}{% endif %}</div>
+      {% else %}<div>Boost range: <strong>{{ p.boost_range[0] if p.boost_range[0] is not none else "?" }}</strong> to <strong>{{ p.boost_range[1] if p.boost_range[1] is not none else "?" }}</strong> Connects.{% if p.boost_chosen %} This preview includes a boost of {{ p.boost_chosen }}.{% endif %}</div>
+      {% if p.boost.recommendation %}<div class="muted small">{{ p.boost.recommendation | untrusted }}</div>{% endif %}
+      {% if p.boost.note %}<div class="muted small">{{ p.boost.note | untrusted }}</div>{% endif %}{% endif %}
     </div>
     {% endif %}
     {% if p.unmet %}
-    <h3 class="sub">Preferred qualifications you don't meet</h3>
+    <h4 class="sub">Preferred qualifications you don't meet</h4>
     <ul class="plain-list" id="unmet">{% for u in p.unmet %}<li>{{ u }}</li>{% endfor %}</ul>
     {% endif %}
-    {% if p.extra_prefs %}<h3 class="sub">Client preferences</h3><ul class="plain-list">{% for u in p.extra_prefs %}<li>{{ u }}</li>{% endfor %}</ul>{% endif %}
+    {% if p.extra_prefs %}<h4 class="sub">Client preferences</h4><ul class="plain-list">{% for u in p.extra_prefs %}<li>{{ u }}</li>{% endfor %}</ul>{% endif %}
+    {% else %}
+    <dl class="kv" id="connects-facts">
+      <div><dt>Connects cost</dt><dd>{{ job.connects_cost if job.connects_cost is not none else "n/a" }}</dd></div>
+      <div><dt>Connects balance</dt><dd>{{ connects_balance if connects_balance is not none else "n/a" }}</dd></div>
+    </dl>
+    {% endif %}
 
-    {% if act.live %}
-    <h3 class="sub">Two questions (Upwork requires them)</h3>
+    {% if p and act.live %}
+    <h3 class="sub">Two questions{{ info("job.questions") }}</h3>
     <form method="post" action="/jobs/{{ job.job_id }}/answers" class="stack" id="ask-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="preview" value="{{ p.id }}">
@@ -145,7 +191,7 @@
         <legend>1. Do you want to attach files?</legend>
         <label><input type="radio" name="attachments" value="none"{% if p.attachments_asked %} checked{% endif %}> No files</label>
         <label><input type="radio" name="attachments" value="want"> Yes, I want to attach files</label>
-        <p class="muted small">This tool cannot attach files. Choose yes to send by hand on Upwork instead.</p>
+        <div class="muted small">This tool cannot attach files. Choose yes to send by hand on Upwork instead.</div>
       </fieldset>
       <fieldset class="choice" id="q-highlights">
         <legend>2. Which highlights should this proposal show?</legend>
@@ -153,14 +199,13 @@
         {% for h in p.highlights %}
         <label><input type="checkbox" name="highlight" value="{{ h.key }}"{% if not h.param %} disabled{% elif h.id in p.chosen_ids.get(h.param, []) %} checked{% endif %}> {{ h.title }} <span class="muted small">({{ h.kind | replace("_", " ") }}{% if not h.param %}, cannot be added from here{% endif %})</span></label>
         {% endfor %}
-        <p class="muted small">Leave all unticked for none. Ticking some makes a new preview.</p>
-        {% elif p.highlights_read %}<p class="muted">You have no highlights on your profile. Nothing will be added.</p>
-        {% else %}<p class="muted">Highlights could not be read. None will be added.</p>{% endif %}
+        <div class="muted small">Leave all unticked for none. Ticking some makes a new preview.</div>
+        {% elif p.highlights_read %}<div class="muted">You have no highlights on your profile. Nothing will be added.</div>
+        {% else %}<div class="muted">Highlights could not be read. None will be added.</div>{% endif %}
       </fieldset>
-      <div class="actions"><button class="btn btn-secondary" type="submit"{% if act.reasons.asked %} disabled aria-disabled="true"{% endif %}>Save answers</button>{% if act.reasons.asked %}<span class="muted small why-disabled">{{ act.reasons.asked }}</span>{% endif %}</div>
+      <div class="actions"><button class="btn btn-secondary" type="submit"{% if act.reasons.asked %} disabled aria-disabled="true"{% endif %}>Save answers</button>{% if act.reasons.asked %}{{ why_off(act.reasons.asked, "asked") }}{% endif %}
+        {% if p.attachments_asked and p.highlights_asked %}{{ pill("Both answered", "ok") }}{% endif %}</div>
     </form>
-    {% if p.attachments_asked and p.highlights_asked %}<p class="muted small">Both questions answered.</p>{% endif %}
-    {% endif %}
     {% endif %}
 
     <div class="actions" id="apply-actions">
@@ -179,42 +224,11 @@
       {% if act.skipped %}
         {{ act_form("unskip", "Un-skip", "secondary", "", "unskip-form") }}
       {% elif job.status != "sent" %}
-        {{ act_form("skip", "Skip this job", "danger", "", "skip-form") }}
+        {{ act_form("skip", "Skip this job", "ghost", "", "skip-form") }}
       {% endif %}
     </div>
-    <p class="muted small">Prepare makes a preview on Upwork and sends nothing. Approve is the only step that can send.</p>
-    {% endcall %}
+    <div class="muted small safety-line">Prepare makes a preview on Upwork and sends nothing. Approve is the only step that can send, and it goes live on Upwork.</div>
     {% endif %}
-  </div>
-
-  <aside class="detail-side" aria-label="Job facts">
-    {% call card("Facts") %}
-    <dl class="kv">
-      <div><dt>Rate paid</dt><dd>{{ (job.rate_paid | rate) or "n/a" }}</dd></div>
-      <div><dt>Budget</dt><dd>{{ job | budget }}
-        {% if job | budget_note %}<small class="muted">({{ job | budget_note }})</small>{% endif %}</dd></div>
-      <div><dt>Type</dt><dd>{{ job.job_type or "n/a" }}</dd></div>
-      <div><dt>Tier</dt><dd>{{ job.tier or "n/a" }}{% if job.tier_estimated %} (estimated){% endif %}</dd></div>
-      <div><dt>Proposals</dt><dd>{{ job.proposals_tier or "n/a" }}</dd></div>
-      <div><dt>Connects cost</dt><dd>{{ job.connects_cost if job.connects_cost is not none else "n/a" }}</dd></div>
-      {% if details.experience_level %}<div><dt>Experience</dt><dd>{{ details.experience_level }}</dd></div>{% endif %}
-      {% if details.duration %}<div><dt>Duration</dt><dd>{{ details.duration }}</dd></div>{% endif %}
-      {% if details.skills %}<div><dt>Skills</dt><dd>{{ details.skills | join(", ") }}</dd></div>{% endif %}
-      <div><dt>First seen</dt><dd>{{ job.first_seen | dt }}</dd></div>
-      <div><dt>Job ID</dt><dd><code class="wrap">{{ job.job_id }}</code></dd></div>
-    </dl>
-    {% endcall %}
-
-    {% call card("Client") %}
-    <dl class="kv">
-      <div><dt>Client spend</dt><dd>{{ (job.client_spend | money) or "n/a" }}</dd></div>
-      <div><dt>Client hours</dt><dd>{{ job.client_hours if job.client_hours is not none else "n/a" }}</dd></div>
-      <div><dt>Client hires</dt><dd>{{ job.client_hires if job.client_hires is not none else "n/a" }}</dd></div>
-      <div><dt>Client rating</dt><dd>{{ job.client_rating if job.client_rating is not none else "n/a" }}
-        {% if job.client_reviews is not none %}<small class="muted">({{ job.client_reviews }} reviews)</small>{% endif %}</dd></div>
-      {% if details.client_country %}<div><dt>Country</dt><dd>{{ details.client_country }}</dd></div>{% endif %}
-      {% if details.hire_rate is not none and details.hire_rate is defined %}<div><dt>Hire rate</dt><dd>{{ details.hire_rate }}%</dd></div>{% endif %}
-    </dl>
     {% endcall %}
   </aside>
 </div>

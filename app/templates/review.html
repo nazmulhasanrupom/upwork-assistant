@@ -1,57 +1,48 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, pill %}
+{% from "_macros.html" import button, flash, card, pill, page_header, jobs_tabs, info, empty %}
 {% block title %}Review a proposal{% endblock %}
 {% block content %}
-{% from "_macros.html" import jobs_tabs as _tabs %}
-<div class="page-head">
-  <h1>Review a proposal</h1>
-  <p class="muted">Paste your draft before you send it. Python checks the spelling and spacing for free, then one Claude call checks the job's own instructions, your first two lines, your proof and your answers, and writes a fixed version. Nothing is sent to Upwork.</p>
-</div>
-{{ _tabs("/review") }}
+{% call page_header("Review a proposal", "review.intro") %}{% endcall %}
+{{ jobs_tabs("/review") }}
 {% if error %}{{ flash("error", error) }}{% endif %}
 
-{% call card("1. Which job?") %}
-  <form method="get" action="/review" class="filters" id="job-picker">
-    <label class="field"><span>Stored job <span class="hint">newest first. Leave empty to paste the job text below.</span></span>
-      <select name="job_id" id="job-select">
-        <option value="">Paste job text instead</option>
-        {% for j in jobs %}<option value="{{ j.job_id }}"{% if j.job_id == job_id %} selected{% endif %}>{{ (j.title or j.job_id)[:90] }}{% if j.tier %} [{{ j.tier }}]{% endif %}</option>{% endfor %}
-      </select>
-    </label>
-    <div class="filter-actions">{{ button("Load this job", "secondary") }}</div>
-  </form>
-  {% if job_id %}<p class="muted small" id="job-chosen">Using the stored job: <strong>{{ job_title }}</strong>{% if budget and (budget.min is not none or budget.max is not none) %}. Budget {{ budget.min if budget.min is not none else "?" }} to {{ budget.max if budget.max is not none else "?" }}{% endif %}.</p>{% endif %}
-{% endcall %}
+<form method="get" action="/review" class="filters filter-bar" id="job-picker">
+  <label class="field"><span>Stored job {{ info("review.job") }}</span>
+    <select name="job_id" id="job-select">
+      <option value="">Paste job text instead</option>
+      {% for j in jobs %}<option value="{{ j.job_id }}"{% if j.job_id == job_id %} selected{% endif %}>{{ (j.title or j.job_id)[:90] }}{% if j.tier %} [{{ j.tier }}]{% endif %}</option>{% endfor %}
+    </select>
+  </label>
+  <div class="filter-actions">{{ button("Load job", "secondary") }}</div>
+</form>
+{% if job_id %}<div class="muted small review-chosen" id="job-chosen">Using the stored job: <strong>{{ job_title }}</strong>{% if budget and (budget.min is not none or budget.max is not none) %}. Budget {{ budget.min if budget.min is not none else "?" }} to {{ budget.max if budget.max is not none else "?" }}{% endif %}.</div>{% endif %}
 
-<form method="post" action="/review" class="stack" id="review-form">
+{% call card("Your proposal") %}
+<form method="post" action="/review" class="stack review-form" id="review-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="job_id" value="{{ job_id }}">
   {% if not job_id %}
-  {% call card("2. Job text") %}
-    <label class="field"><span>Job post <span class="hint">Paste the whole post, including the screening questions.</span></span>
-      <textarea name="job_text" rows="8" id="job-text" maxlength="{{ input_max }}">{{ job_text }}</textarea></label>
-  {% endcall %}
+  <label class="field"><span>Job post {{ info("review.job_text") }}</span>
+    <textarea name="job_text" rows="6" id="job-text" maxlength="{{ input_max }}">{{ job_text }}</textarea></label>
   {% endif %}
-  {% call card("3. Your draft") %}
-    <label class="field"><span>Cover letter</span>
-      <textarea name="cover_letter" rows="12" id="cover-letter" maxlength="{{ input_max }}" required>{{ cover_letter }}</textarea></label>
-    {% if questions %}
-      {% for q in questions %}
-      <label class="field"><span>Answer {{ loop.index }}: {{ q }}</span>
-        <textarea name="answer_{{ loop.index0 }}" rows="4" id="answer-{{ loop.index0 }}" maxlength="{{ input_max }}">{{ answers[loop.index0] }}</textarea></label>
-      {% endfor %}
-    {% else %}
-      <label class="field"><span>Screening answers <span class="hint">Optional. Paste each question with your answer.</span></span>
-        <textarea name="answers_free" rows="5" id="answers-free" maxlength="{{ input_max }}">{{ answers_free }}</textarea></label>
-    {% endif %}
-    <label class="field"><span>My rate <span class="hint">For example 35 (per hour) or your fixed bid.</span></span>
-      <input type="text" name="rate" id="rate" value="{{ rate }}" maxlength="40" inputmode="decimal"></label>
-  {% endcall %}
-  <div class="actions">{{ button("Review my proposal", "primary") }}</div>
+  <label class="field"><span>Cover letter</span>
+    <textarea name="cover_letter" rows="10" id="cover-letter" maxlength="{{ input_max }}" required>{{ cover_letter }}</textarea></label>
+  {% if questions %}
+    {% for q in questions %}
+    <label class="field"><span>Answer {{ loop.index }}: {{ q }}</span>
+      <textarea name="answer_{{ loop.index0 }}" rows="4" id="answer-{{ loop.index0 }}" maxlength="{{ input_max }}">{{ answers[loop.index0] }}</textarea></label>
+    {% endfor %}
+  {% else %}
+    <label class="field"><span>Screening answers {{ info("review.answers") }}</span>
+      <textarea name="answers_free" rows="4" id="answers-free" maxlength="{{ input_max }}">{{ answers_free }}</textarea></label>
+  {% endif %}
+  <label class="field"><span>My rate {{ info("review.rate") }}</span>
+    <input type="text" name="rate" id="rate" value="{{ rate }}" maxlength="40" inputmode="decimal"></label>
+  <div class="actions">{{ button("Check", "primary") }}</div>
 </form>
+{% endcall %}
 
-{% call card("Proposals you sent") %}
-  <p class="muted small">The daily run reads your sent proposals from Upwork and reviews each new one once. Nothing is changed on Upwork.</p>
+{% call card("Proposals you sent", help_key="review.sent") %}
   {% if proposals %}
   <div class="table-wrap">
   <table class="table" id="sent-proposals">
@@ -71,10 +62,10 @@
     </tbody>
   </table>
   </div>
-  {% else %}<p class="muted" id="sent-proposals">No sent proposals yet. They appear after the next daily run.</p>{% endif %}
+  {% else %}<p class="muted" id="sent-proposals">No sent proposals yet.</p>{% endif %}
 {% endcall %}
 
-{% call card("Past reviews") %}
+{% call card("Past reviews", help_key="review.history") %}
   {% if history %}
   <div class="table-wrap">
   <table class="table" id="review-history">

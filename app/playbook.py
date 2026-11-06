@@ -328,10 +328,18 @@ def page_data(
         except ValueError:
             base = {}
         rows.append({**dict(r), "baseline": base})
+    act = active_experiment(conn)
+    days_left = None
+    if act is not None:
+        try:
+            days_left = max(0, (date.fromisoformat(act["ends"]) - _today(settings, now)).days)
+        except (ValueError, TypeError):
+            days_left = None
     return {
         "tactics": tactics(config),
         "experiments": rows,
-        "active": active_experiment(conn),
+        "active": act,
+        "days_left": days_left,
         "blocked": can_start_test(conn, settings, now),
         "test_days": int(settings.get("playbook.test_days")),
     }

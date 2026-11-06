@@ -1,11 +1,8 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button %}
+{% from "_macros.html" import button, page_header %}
 {% block title %}Log {{ log_name }}{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Log</h1>
-  <p class="muted"><code>{{ log_name }}</code> ({{ size }} bytes){% if cut %}. Only the last {{ limit_kb }} KB are shown.{% endif %}</p>
-</div>
-<p>{{ button("Back to runs", "secondary", href="/runs") }}</p>
+{% call page_header("Log", "runs.log") %}{{ button("Back to runs", "secondary", href="/runs") }}{% endcall %}
+<p class="muted"><code>{{ log_name }}</code> ({{ size }} bytes){% if cut %}. Only the last {{ limit_kb }} KB are shown.{% endif %}</p>
 {% if text.strip() %}<pre class="logview" id="log-text">{{ text }}</pre>{% else %}<p class="muted">This log is empty.</p>{% endif %}
 {% endblock %}

@@ -30,7 +30,7 @@
   {% if rows %}
   <ul class="todo-list approval-list">
     {% for it in rows %}
-    {% if it.kind is defined %}
+    {% if it.has_handler is defined %}
     <li class="card todo-row" id="approval-{{ it.id }}">
       <div class="todo-main">
         <div class="card-head">{{ icon(kind_icons.get(it.kind, "list-todo")) }} {{ pill(it.kind) }} <span class="muted small">{{ it.created_at | dt }}</span></div>

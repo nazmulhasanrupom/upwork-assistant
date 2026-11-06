@@ -5,6 +5,7 @@
 {% set ns = namespace(last="") %}
 {% for r in last_runs.values() if r %}{% if r.started > ns.last %}{% set ns.last = r.started %}{% endif %}{% endfor %}
 {% call page_header("Home") %}
+  <span class="muted small">Signed in as {{ user }}</span>
   {% if ns.last %}<span class="muted small" id="last-run">Last run {{ ns.last | dt }}</span>{% endif %}
   {% if kill_switch %}
   <button class="btn btn-secondary" type="button" disabled>Run now</button> <span class="small muted">kill switch is on</span>

@@ -1,37 +1,29 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, pill, copy_button %}
+{% from "_macros.html" import button, flash, card, pill, copy_button, page_header, jobs_tabs, info %}
 {% block title %}Review {{ review.id }}{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Review #{{ review.id }}{% if review.job_title %}: {{ review.job_title }}{% endif %}</h1>
-  <p class="muted"><time>{{ review.created_at | dt }}</time>{% if review.model %} &middot; {{ review.model }}{% endif %} &middot; Claude cost ${{ "%.4f"|format(review.cost) }}
-    &middot; <a href="/review{% if review.job_id %}?job_id={{ review.job_id }}{% endif %}">Review another</a>
-    {% if review.job_id %}&middot; <a href="/jobs/{{ review.job_id }}">Open the job</a>{% endif %}</p>
-</div>
+{% call page_header("Review #" ~ review.id ~ (": " ~ review.job_title if review.job_title else "")) %}
+  {{ button("Review another", "secondary", href="/review" ~ ("?job_id=" ~ review.job_id if review.job_id else "")) }}
+  {% if review.job_id %}{{ button("Open the job", "ghost", href="/jobs/" ~ review.job_id) }}{% endif %}
+{% endcall %}
+{{ jobs_tabs("/review") }}
+
+<div class="muted small review-meta"><time>{{ review.created_at | dt }}</time>{% if review.model %}<span>{{ review.model }}</span>{% endif %}<span>Claude cost ${{ "%.4f"|format(review.cost) }}</span></div>
 
 {% if review.error %}{{ flash("warn", review.error) }}{% endif %}
 {% for w in review.result.warnings or [] %}{{ flash("warn", w) }}{% endfor %}
 
-<section class="score-row" aria-label="Score">
+<section class="review-summary" aria-label="Score">
   {% if review.score is not none %}
   <div class="score-badge big {{ review.score_class }}" id="score-badge" aria-label="Score {{ review.score }} out of 100"><strong>{{ review.score }}</strong><span>/ 100</span></div>
-  <p class="muted score-text">
-    {% if review.score_class == "good" %}Ready to send after a last read.{% elif review.score_class == "ok" %}Fix a few things first.{% else %}Needs real work.{% endif %}
-  </p>
+  <div class="score-text">
+    <strong>{% if review.score_class == "good" %}Ready after a last read.{% elif review.score_class == "ok" %}Fix a few things first.{% else %}Needs real work.{% endif %}</strong>
+    {{ info("review.score") }}
+  </div>
   {% else %}
   <div class="score-badge big none" id="score-badge"><strong>-</strong><span>not scored</span></div>
   {% endif %}
 </section>
-
-{% call card("Quick checks (Python, free)") %}
-  {% if review.prechecks %}
-  <ul class="findings" id="prechecks">
-    {% for f in review.prechecks %}
-    <li class="finding {{ f.severity }}">{{ pill({"error": "Fix", "warn": "Check", "info": "Note"}.get(f.severity, f.severity), {"error": "bad", "warn": "warn", "info": ""}.get(f.severity, "")) }} <span>{{ f.message }}</span></li>
-    {% endfor %}
-  </ul>
-  {% else %}<p class="muted" id="prechecks">No spelling, spacing, length or rate problems found.</p>{% endif %}
-{% endcall %}
 
 {% if review.score is not none %}
 {% call card("Main issues") %}
@@ -43,11 +35,23 @@
   </ol>
   {% else %}<p class="muted" id="issues">No issues found.</p>{% endif %}
 {% endcall %}
+{% endif %}
 
+{% call card("Quick checks", help_key="review.prechecks") %}
+  {% if review.prechecks %}
+  <ul class="findings" id="prechecks">
+    {% for f in review.prechecks %}
+    <li class="finding {{ f.severity }}">{{ pill({"error": "Fix", "warn": "Check", "info": "Note"}.get(f.severity, f.severity), {"error": "bad", "warn": "warn", "info": ""}.get(f.severity, "")) }} <span>{{ f.message }}</span></li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted" id="prechecks">No spelling, spacing, length or rate problems found.</p>{% endif %}
+{% endcall %}
+
+{% if review.score is not none %}
 {% call card("Job instructions, first lines and proof") %}
   <div class="compare">
     <div>
-      <h3>Instructions found in the job post</h3>
+      <h3>Instructions found</h3>
       {% if review.result.instructions_found %}
       <ul class="plain-list" id="instructions-found">{% for x in review.result.instructions_found %}<li>{{ x }}</li>{% endfor %}</ul>
       {% else %}<p class="muted" id="instructions-found">None found.</p>{% endif %}
@@ -66,8 +70,9 @@
 {% endcall %}
 
 {% if review.fixed %}
-{% call card("Cover letter: your draft and the fixed version") %}
-  <p class="muted small">Removed words are <del>struck through</del> on the left. Added words are <ins>underlined</ins> on the right.</p>
+{% call card("Fixed version", help_key="review.diff") %}
+<details class="review-details" id="cover-diff">
+  <summary>Cover letter: your draft and the fixed version</summary>
   <div class="compare diff-compare">
     <div>
       <h3>Your draft</h3>
@@ -76,9 +81,10 @@
     <div>
       <h3>Fixed version</h3>
       <div class="difftext" id="fixed-cover">{{ review.cover_right }}</div>
-      <div class="actions">{{ copy_button("fixed-cover", "Copy fixed cover letter") }}</div>
     </div>
   </div>
+</details>
+<div class="actions">{{ copy_button("fixed-cover", "Copy fixed cover letter") }}</div>
 {% endcall %}
 {% endif %}
 {% endif %}
@@ -89,11 +95,14 @@
   <div class="answer-block" id="answer-{{ a.n }}">
     <h3>Answer {{ a.n }}{% if a.question %}: {{ a.question }}{% endif %}</h3>
     {% if review.fixed %}
-    <div class="compare diff-compare">
-      <div><h4>Your draft</h4><div class="difftext" id="original-answer-{{ a.n }}">{{ a.left }}</div></div>
-      <div><h4>Fixed version</h4><div class="difftext" id="fixed-answer-{{ a.n }}">{{ a.right }}</div>
-        <div class="actions">{{ copy_button("fixed-answer-" ~ a.n, "Copy answer " ~ a.n) }}</div></div>
-    </div>
+    <details class="review-details">
+      <summary>Your draft and the fixed version</summary>
+      <div class="compare diff-compare">
+        <div><h4>Your draft</h4><div class="difftext" id="original-answer-{{ a.n }}">{{ a.left }}</div></div>
+        <div><h4>Fixed version</h4><div class="difftext" id="fixed-answer-{{ a.n }}">{{ a.right }}</div></div>
+      </div>
+    </details>
+    <div class="actions">{{ copy_button("fixed-answer-" ~ a.n, "Copy answer " ~ a.n) }}</div>
     {% else %}
     <div class="difftext" id="original-answer-{{ a.n }}">{{ a.original }}</div>
     {% endif %}

@@ -1,27 +1,26 @@
 {% extends "base.html" %}
+{% from "_macros.html" import page_header, growth_tabs, pill, empty, tabs %}
 {% block title %}Reports{% endblock %}
 {% block content %}
-{% from "_macros.html" import growth_tabs as _tabs %}
-<div class="page-head">
-  <h1>Reports</h1>
-  <p class="muted">The weekly trend report and the monthly plan, newest first.
-    <a href="/reports"{% if not kind %} aria-current="page"{% endif %}>All</a> ·
-    <a href="/reports?kind=weekly"{% if kind == "weekly" %} aria-current="page"{% endif %}>Weekly</a> ·
-    <a href="/reports?kind=monthly"{% if kind == "monthly" %} aria-current="page"{% endif %}>Monthly</a></p>
-</div>
-{{ _tabs("/reports") }}
+{{ page_header("Reports", "reports.intro") }}
+{{ growth_tabs("/reports") }}
+<nav class="filter-chips" aria-label="Kind">
+  <a class="filter-chip" href="/reports"{% if not kind %} aria-current="page"{% endif %}>All</a>
+  <a class="filter-chip" href="/reports?kind=weekly"{% if kind == "weekly" %} aria-current="page"{% endif %}>Weekly</a>
+  <a class="filter-chip" href="/reports?kind=monthly"{% if kind == "monthly" %} aria-current="page"{% endif %}>Monthly</a>
+</nav>
 {% if rows %}
 <div class="table-wrap">
 <table class="table" id="reports-table">
-  <thead><tr><th>Report</th><th>Kind</th><th>Period</th><th>Made</th></tr></thead>
+  <thead><tr><th scope="col">Kind</th><th scope="col">Report</th><th scope="col">Period</th><th scope="col">Made</th></tr></thead>
   <tbody>
   {% for r in rows %}
-  <tr><td><a href="/reports/{{ r.id }}">{{ r.title }}</a></td><td>{{ r.kind }}</td><td>{{ r.period }}</td><td>{{ r.created_at | dt }}</td></tr>
+  <tr data-href="/reports/{{ r.id }}"><td>{{ pill(r.kind, "ok" if r.kind == "monthly" else "") }}</td><td><a href="/reports/{{ r.id }}">{{ r.title }}</a></td><td>{{ r.period }}</td><td>{{ r.created_at | dt }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
 {% else %}
-<p class="muted" id="reports-empty">No reports yet. The weekly task runs on Monday and the monthly task on the 1st. You can also start them with Run now on the dashboard.</p>
+<div id="reports-empty">{{ empty("file-text", "No reports yet. The weekly task runs on Monday, the monthly on the 1st.") }}</div>
 {% endif %}
 {% endblock %}

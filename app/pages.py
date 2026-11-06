@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import approvals, charts, job_actions
+from app import approvals, charts, job_actions, markdown_lite
 from app import costs as cost_totals
 from app import metrics as metrics_data
 from app import rank as rank_data
@@ -114,6 +114,7 @@ def install_filters(templates: Any, tz_name: str) -> None:
     env = templates.env
     env.filters["dt"] = lambda v: fmt_dt(v, tz_name)
     env.filters["money"] = fmt_money
+    env.filters["md"] = markdown_lite.render
     env.filters["rate"] = fmt_rate
     env.filters["untrusted"] = strip_untrusted
     env.filters["budget"] = lambda job: budget_text(job)[0]
@@ -215,9 +216,11 @@ def dashboard_data(
     best_jobs = [
         dict(r)
         for r in conn.execute(
-            "SELECT job_id, title, tier, fit_score, rate_paid FROM jobs "
-            "WHERE tier IN ('HIGH', 'MID') AND status != 'dropped' AND first_seen >= ? "
-            "ORDER BY (tier = 'HIGH') DESC, COALESCE(fit_score, -1) DESC, first_seen DESC LIMIT 5",
+            "SELECT j.job_id, j.title, j.tier, g.fit_score FROM jobs j "
+            "LEFT JOIN judgements g ON g.job_id = j.job_id "
+            "WHERE j.tier IN ('HIGH', 'MID') AND j.status != 'dropped' AND j.first_seen >= ? "
+            "ORDER BY (j.tier = 'HIGH') DESC, COALESCE(g.fit_score, -1) DESC, j.first_seen DESC "
+            "LIMIT 5",
             (since,),
         )
     ]
@@ -387,10 +390,12 @@ def jobs_list(
     date_from: str = "",
     date_to: str = "",
     afford: str = "",
+    q: str = "",
     page: int = 1,
 ) -> Response:
     conn: sqlite3.Connection = request.app.state.db
     tz = _tz(request)
+    q = q.strip()[:100]
     tier = tier.upper() if tier.upper() in TIERS else ""
     status = status if status in STATUSES or status == STATUS_ALL else STATUS_ACTIVE
     day_from, day_to = _parse_day(date_from), _parse_day(date_to)
@@ -404,6 +409,10 @@ def jobs_list(
     elif status != STATUS_ALL:
         where.append("j.status = ?")
         args.append(status)
+    if q:
+        like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        where.append("j.title LIKE ? ESCAPE '\\'")
+        args.append(f"%{like}%")
     if day_from:
         where.append("j.first_seen >= ?")
         args.append(_local_day_start_utc(day_from, tz))
@@ -451,16 +460,17 @@ def jobs_list(
         )
 
     def page_url(n: int) -> str:
-        q = {
+        query = {
             "tier": tier,
             "status": status,
             "date_from": date_from,
             "date_to": date_to,
             "afford": afford,
+            "q": q,
         }
-        q = {k: v for k, v in q.items() if v}
-        q["page"] = str(n)
-        return "/jobs?" + urlencode(q)
+        query = {k: v for k, v in query.items() if v}
+        query["page"] = str(n)
+        return "/jobs?" + urlencode(query)
 
     return render(
         request,
@@ -478,6 +488,7 @@ def jobs_list(
         f_from=day_from.isoformat() if day_from else "",
         f_to=day_to.isoformat() if day_to else "",
         f_afford=afford,
+        f_q=q,
         hide_default=bool(request.app.state.settings.get("ui.hide_unaffordable")),
         balance=balance,
     )
@@ -515,6 +526,7 @@ def job_page(
     if not isinstance(details, dict):
         details = {}
     fit_min = int(settings.get("pay.fit_min"))
+    latest = conn.execute("SELECT balance FROM connects ORDER BY id DESC LIMIT 1").fetchone()
     return render(
         request,
         "job_detail.html",
@@ -532,6 +544,7 @@ def job_page(
         edit_dashes=edit_dashes,
         max_letter=int(settings.get("writes.cover_letter_max_chars")),
         max_answer=int(settings.get("writes.answer_max_chars")),
+        connects_balance=latest["balance"] if latest else None,
     )
 
 

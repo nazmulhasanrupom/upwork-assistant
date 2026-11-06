@@ -1,17 +1,14 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, stat, info %}
+{% from "_macros.html" import button, flash, stat, info, page_header, empty %}
 {% block title %}Runs and costs{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Runs and costs{{ info("runs.cost") }}</h1>
-  <p class="muted">Claude cost comes from the cost Claude reports for each call. Runs are the tasks the scheduler or you started.</p>
-</div>
+{% call page_header("Runs and costs", "runs.page") %}{% endcall %}
 
 {% if costs.reached %}{{ flash("error", "Monthly cap reached: $" ~ "%.2f"|format(costs.month) ~ " of $" ~ "%.2f"|format(costs.cap) ~ ". Claude steps are paused.") }}
 {% elif costs.warn %}{{ flash("warn", "Claude cost is " ~ costs.percent ~ "% of the monthly cap.") }}{% endif %}
 
 <section aria-label="Claude cost" class="stats">
-  {{ stat("Today", "$" ~ "%.2f"|format(costs.today), "", "", "cost-today") }}
+  {{ stat("Today", "$" ~ "%.2f"|format(costs.today), "", "", "cost-today", help_key="runs.cost") }}
   {{ stat("This week", "$" ~ "%.2f"|format(costs.week), "since Monday", "", "cost-week") }}
   {{ stat("This month", "$" ~ "%.2f"|format(costs.month), "", "warn" if costs.warn or costs.reached else "", "cost-month") }}
   <div class="stat" id="cost-cap">
@@ -60,10 +57,7 @@
 </table>
 </div>
 {% else %}
-<div class="empty">
-  <p><strong>No runs yet.</strong></p>
-  <p class="muted">Runs appear here after a task starts. Use Run now on the dashboard.</p>
-</div>
+{{ empty("list-todo", "No runs yet.") }}
 {% endif %}
 
 {% if prev_url or next_url %}

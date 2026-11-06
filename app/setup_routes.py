@@ -105,6 +105,19 @@ def mark_done(request: Request, key: str) -> None:
         settings.set("setup.done_steps", [*done, key])
 
 
+def _current_step(request: Request, steps: list[dict[str, Any]]) -> str:
+    """The one step shown on screen: ?step=, else the step a POST belongs to, else the first
+    step still to do, else the Finish screen."""
+    keys = [st["key"] for st in steps] + ["finish"]
+    asked = request.query_params.get("step", "")
+    if asked in keys:
+        return asked
+    last = request.url.path.rstrip("/").rsplit("/", 1)[-1]
+    if request.url.path.startswith("/setup/") and last in keys:
+        return last
+    return next((st["key"] for st in steps if not st["done"]), "finish")
+
+
 def _hub(request: Request, status: int = 200, **ctx: Any) -> Response:
     s = request.app.state
     steps = _hub_steps(request)
@@ -117,6 +130,7 @@ def _hub(request: Request, status: int = 200, **ctx: Any) -> Response:
         "setup.html",
         status,
         steps=steps,
+        current=_current_step(request, steps),
         required_left=required_left,
         finished=bool(st.get("setup.finished")),
         keywords_text="\n".join(str(k) for k in st.get("search.keywords")),

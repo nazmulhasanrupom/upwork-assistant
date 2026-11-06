@@ -33,7 +33,7 @@ def stat(html, stat_id):
 
 
 def cards(html):
-    return html.count('class="card"')
+    return html.count("<tr data-href=")
 
 
 @pytest.mark.parametrize("path", ["/", "/jobs", "/jobs/123"])
@@ -130,6 +130,17 @@ def test_jobs_date_filter(web, config):
     assert cards(client.get("/jobs?date_from=2999-01-01").text) == 0
     assert cards(client.get("/jobs?date_to=2000-01-01").text) == 0
     assert cards(client.get("/jobs?date_from=garbage&tier=nope").text) == 5  # bad input ignored
+
+
+def test_jobs_title_search(web, config):
+    app, client = web
+    run(app, config)
+    assert cards(client.get("/jobs?q=zzzz-no-such-title").text) == 0
+    assert cards(client.get("/jobs?q=%25").text) == 0  # % is a literal, not a wildcard
+    first = app.state.db.execute(
+        "SELECT title FROM jobs WHERE status != 'dropped' LIMIT 1"
+    ).fetchone()[0]
+    assert cards(client.get("/jobs", params={"q": first[:12].lower()}).text) >= 1
 
 
 def test_jobs_pagination(web, config):
@@ -271,7 +282,7 @@ def test_job_pages_show_fit_and_draft(web, config, fake_claude_gen):
     run(app, config, balance=10)
 
     jobs = client.get("/jobs").text
-    assert "Fit 80" in jobs and "Draft ready" in jobs and "reason one" in jobs
+    assert "<strong>80</strong>" in jobs and "Draft ready" in jobs  # Score column + pill
     assert "Can&#39;t afford" in jobs or "Can't afford" in jobs
 
     jid = "2118527230669974661"  # HIGH, costs 12 Connects, balance 10

@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pill, button, page_header %}
 {% block title %}{{ r.title }}{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>{{ r.title }}</h1>
-  <p class="muted">{{ r.kind }} report · made {{ r.created_at | dt }} · <a href="/reports">All reports</a></p>
-</div>
-<pre class="text" id="report-body">{{ r.body }}</pre>
+{% call page_header(r.title) %}
+  {{ button("All reports", "ghost", href="/reports", small=true) }}
+{% endcall %}
+<p class="muted small">{{ pill(r.kind, "ok" if r.kind == "monthly" else "") }} Made {{ r.created_at | dt }}</p>
+<article class="prose card panel" id="report-body">{{ r.body | md }}</article>
 {% if stats %}
 <details>
   <summary>Numbers behind this report</summary>

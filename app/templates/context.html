@@ -1,31 +1,22 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card %}
+{% from "_macros.html" import button, flash, card, page_header, growth_tabs %}
 {% block title %}Profile context{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-{% from "_macros.html" import growth_tabs as _tabs %}
-<div class="page-head">
-  <h1>Profile context</h1>
-  <p class="muted">Claude reads these two files on every judging and writing run. Keep them short and true.</p>
-</div>
-{{ _tabs("/context") }}
+{% call page_header("Profile", "context.intro") %}
+  <form method="post" action="/context/build" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Rebuild from Upwork" if current_chars else "Build from Upwork", "secondary") }}
+  </form>
+{% endcall %}
+{{ growth_tabs("/context") }}
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 {% if counts.over %}{{ flash("warn", "USER.md and MEMORY.md together are " ~ counts.total ~ " characters, over the " ~ counts.cap ~ " character cap. Shorten them so every run stays cheap and focused.") }}{% endif %}
 {% if not current_chars and not proposed %}{{ flash("warn", "USER.md is empty. Drafts need your profile facts. Press Build from Upwork, or write it yourself.") }}{% endif %}
 
-{% call card("Rebuild from Upwork" if current_chars else "Build from Upwork") %}
-  <p>Reads your Upwork profile (and portfolio highlights if available) and asks Claude for a short
-    USER.md with facts only. You see it next to the current one first. Nothing is saved until you
-    click <strong>Use this</strong> (it then goes through the size cap, the noise check and the saved history). It costs a few cents.</p>
-  <form method="post" action="/context/build" class="actions">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Rebuild from Upwork" if current_chars else "Build from Upwork", "secondary") }}
-  </form>
-{% endcall %}
-
 {% if proposed %}
-{% call card("Proposed USER.md", "panel proposal") %}
+{% call card("Proposed USER.md", "panel proposal", help_key="context.rebuild") %}
   <p class="count{% if proposed_chars > build_max %} over{% endif %}" id="proposed-count">{{ proposed_chars }} characters (target: {{ build_max }} or fewer){% if proposed_chars > build_max %}. This is over the target, shorten it before you use it.{% endif %}{% if cost is not none %} Claude cost: ${{ "%.4f"|format(cost) }}.{% endif %}</p>
   <div class="compare">
     <div>
@@ -43,21 +34,21 @@
   </div>
   <form method="post" action="/context/discard" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Discard", "secondary", small=true) }}
+    {{ button("Discard", "ghost", small=true) }}
   </form>
 {% endcall %}
 {% endif %}
 
 <form method="post" action="/context" class="stack" id="context-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  {% call card("USER.md: facts about you") %}
-    <label class="field"><span>USER.md <span class="hint">Title, rate, skills, real projects with numbers, experience, languages, Upwork stats. Facts only.</span></span>
+  {% call card("USER.md: facts about you", help_key="context.user") %}
+    <label class="field"><span>USER.md <span class="hint">Facts only: title, rate, skills, real projects with numbers.</span></span>
       <textarea name="user_md" rows="14" id="user-md" maxlength="{{ input_max }}">{{ user_md }}</textarea></label>
-    <p class="count{% if counts.over %} over{% endif %}" id="user-count">USER.md {{ counts.user }} + MEMORY.md {{ counts.memory }} = {{ counts.total }} of {{ counts.cap }} characters{% if counts.over %}. Over the cap by {{ counts.total - counts.cap }}.{% endif %}</p>
+    <p class="count small{% if counts.over %} over{% endif %}" id="user-count">USER.md {{ counts.user }} + MEMORY.md {{ counts.memory }} = {{ counts.total }} of {{ counts.cap }} characters{% if counts.over %}. Over the cap by {{ counts.total - counts.cap }}.{% endif %}</p>
     <div class="meter{% if counts.over %} over{% elif counts.percent >= 85 %} warn{% endif %}" role="progressbar" aria-valuemin="0" aria-valuemax="{{ counts.cap }}" aria-valuenow="{{ counts.total }}" aria-label="Memory size"><span style="width: {{ counts.percent }}%"></span></div>
   {% endcall %}
-  {% call card("style.md: how you write") %}
-    <label class="field"><span>style.md <span class="hint">{% if has_style_file %}Your own style.{% else %}This is the default style. Edit it to make it yours.{% endif %} Empty or unchanged text uses the default.</span></span>
+  {% call card("style.md: how you write", help_key="context.style") %}
+    <label class="field"><span>style.md <span class="hint">{% if has_style_file %}Your own style.{% else %}This is the default style. Edit it to make it yours.{% endif %}</span></span>
       <textarea name="style_md" rows="8" id="style-md" maxlength="{{ input_max }}">{{ style_md }}</textarea></label>
   {% endcall %}
   <div class="actions">{{ button("Save", "primary") }}</div>

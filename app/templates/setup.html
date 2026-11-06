@@ -1,42 +1,63 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, pill %}
+{% from "_macros.html" import button, flash, card, pill, page_header, info, icon %}
 {% block title %}Setup{% endblock %}
-{% block main_class %}narrow{% endblock %}
+{% block main_class %}medium{% endblock %}
 {% block content %}
-<h1>Setup</h1>
-<p class="muted">Ten steps. Dry-run stays ON until you turn it off on your own.</p>
+{% call page_header("Setup", "setup.intro") %}{% endcall %}
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 {% if finished %}{{ flash("info", "Setup is finished. You can still change any step here.") }}{% endif %}
-<div class="setup-steps" id="setup-steps">
+{% set keys = steps | map(attribute="key") | list + ["finish"] %}
+{% set idx = keys.index(current) %}
+<ol class="step-dots" id="setup-steps" aria-label="Setup steps">
 {% for st in steps %}
-  {% call card(cls="panel") %}
-  <div id="step-{{ st.key }}" class="setup-step">
-    <h2>{{ loop.index }}. {{ st.title }}
+  <li><a id="step-{{ st.key }}" href="/setup?step={{ st.key }}" class="{% if st.done %}done{% endif %}"{% if st.key == current %} aria-current="step"{% endif %} title="{{ st.title }}" aria-label="Step {{ loop.index }}: {{ st.title }}{% if st.done %}, done{% endif %}">{{ loop.index }}</a></li>
+{% endfor %}
+  <li><a id="step-finish" href="/setup?step=finish"{% if current == "finish" %} aria-current="step"{% endif %} title="Finish" aria-label="Finish">{{ icon("check") }}</a></li>
+</ol>
+
+{% call card(cls="panel") %}
+<div id="panel-{{ current }}" class="setup-body">
+{% if current == "finish" %}
+  <h2 class="wiz-title">Finish{{ info("setup.finish") }}</h2>
+  {% if required_left %}{{ flash("info", "Still to do: " ~ (required_left | join(", ")) ~ ".") }}{% endif %}
+  <form method="post" action="/setup/finish">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Finish setup", "primary") }}
+  </form>
+{% else %}
+  {% set st = steps[idx] %}
+  {% if st.key == "admin" %}{% set tip = info("setup.admin") %}
+  {% elif st.key == "claude" %}{% set tip = info("setup.claude") %}
+  {% elif st.key == "upwork" %}{% set tip = info("setup.upwork") %}
+  {% elif st.key == "profile" %}{% set tip = info("setup.profile") %}
+  {% elif st.key == "keywords" %}{% set tip = info("setup.keywords") %}
+  {% elif st.key == "pay" %}{% set tip = info("setup.pay") %}
+  {% elif st.key == "style" %}{% set tip = info("setup.style") %}
+  {% elif st.key == "email" %}{% set tip = info("setup.email") %}
+  {% elif st.key == "schedule" %}{% set tip = info("setup.schedule") %}
+  {% else %}{% set tip = info("setup.dryrun") %}{% endif %}
+  <div id="step-body-{{ st.key }}" class="setup-step">
+    <h2 class="wiz-title">{{ idx + 1 }}. {{ st.title }}{{ tip }}
       {% if st.done %}{{ pill("Done", "good") }}{% elif st.optional %}{{ pill("Optional") }}{% else %}{{ pill("To do", "warn") }}{% endif %}</h2>
     {% if st.key == "admin" %}
       <p class="muted">The admin account and the authenticator app are set.</p>
     {% elif st.key == "claude" %}
-      <p class="muted">Runs a short test call to Claude. A wrong or missing token is shown here, never the token itself.</p>
       <form method="post" action="/setup/claude">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {{ button("Run Claude check", "primary") }}
       </form>
     {% elif st.key == "upwork" %}
-      <p class="muted">Log in to Upwork and pick the freelancer account on the Upwork page.</p>
       <p><a class="btn btn-secondary" href="/upwork">Open the Upwork page</a></p>
     {% elif st.key == "profile" %}
-      <p class="muted">Build USER.md from your Upwork profile, edit it, and save it.</p>
       <p><a class="btn btn-secondary" href="/context">Open the Profile page</a></p>
     {% elif st.key == "keywords" %}
-      <p class="muted">One search keyword per line.</p>
       <form method="post" action="/setup/keywords" class="stack">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label class="field"><span>Keywords</span><textarea name="keywords" rows="5">{{ keywords_text }}</textarea></label>
         {{ button("Save keywords", "primary") }}
       </form>
     {% elif st.key == "pay" %}
-      <p class="muted">Your pay rules. The defaults are fine to start with.</p>
       <form method="post" action="/setup/pay" class="stack">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {% for key, value in pay_values.items() %}
@@ -45,21 +66,18 @@
         {{ button("Save pay rules", "primary") }}
       </form>
     {% elif st.key == "style" %}
-      <p class="muted">Default: plain English, short sentences, no em dashes. Write your own on the Profile page.</p>
-      <form method="post" action="/setup/style">
+      <form method="post" action="/setup/style" class="actions">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {{ button("Keep the default style", "primary") }}
         <a class="btn btn-secondary" href="/context">Write my own</a>
       </form>
     {% elif st.key == "email" %}
-      <p class="muted">Connect Gmail to get the daily digest. You can skip this.</p>
-      <form method="post" action="/setup/skip/email">
+      <form method="post" action="/setup/skip/email" class="actions">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <a class="btn btn-secondary" href="/settings/email">Open the Email page</a>
         {{ button("Skip for now", "secondary") }}
       </form>
     {% elif st.key == "schedule" %}
-      <p class="muted">Cron times in your time zone.</p>
       <form method="post" action="/setup/schedule" class="stack">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label class="field"><span>Time zone</span><input name="general.timezone" value="{{ timezone }}" required></label>
@@ -69,22 +87,18 @@
         {{ button("Save schedules", "primary") }}
       </form>
     {% elif st.key == "dryrun" %}
-      <p class="muted">Dry-run is {{ "ON" if dry_run else "OFF" }}. While it is on, nothing is sent to Upwork. Turn it off later in Settings.</p>
+      <p><strong>Dry-run is {{ "ON" if dry_run else "OFF" }}.</strong> {% if dry_run %}Nothing is sent to Upwork.{% else %}Keep it ON to start.{% endif %}</p>
       <form method="post" action="/setup/dryrun">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {{ button("Keep dry-run ON", "primary") }}
       </form>
     {% endif %}
   </div>
-  {% endcall %}
-{% endfor %}
+{% endif %}
 </div>
-{% call card(cls="panel") %}
-<h2>Finish</h2>
-{% if required_left %}<p class="muted">Still to do: {{ required_left | join(", ") }}.</p>{% endif %}
-<form method="post" action="/setup/finish">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  {{ button("Finish setup", "primary") }}
-</form>
+<div class="step-nav">
+  {% if idx > 0 %}{{ button("Back", "ghost", href="/setup?step=" ~ keys[idx - 1]) }}{% else %}<span></span>{% endif %}
+  {% if idx < keys | length - 1 %}{{ button("Next", "secondary", href="/setup?step=" ~ keys[idx + 1]) }}{% endif %}
+</div>
 {% endcall %}
 {% endblock %}
