@@ -30,6 +30,7 @@ The full design is in `SPEC.md` (same folder). **Read the sections named in your
 - Keep all tunable values in settings (`config/defaults.toml` + `settings` table), never hard-coded.
 - Local tests: `.venv/bin/pytest -q` (make the venv with `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt`). Image tests: `docker build -t upwork-assistant:dev . && docker run --rm upwork-assistant:dev pytest -q`.
 - Log to `progress.md` in the format from your agent rules (`STARTED:` / `DONE:` / `BLOCKED:` per step).
+- FAST CHECKS (user choice 2026-11-06): per step run local pytest + ruff check + ruff format --check only. Image (Docker) tests run once, at the end of a phase (manager says when). Screenshots only for steps that add or change a page. Still write full tests for new code; never cut tests on write paths.
 
 ---
 
@@ -250,3 +251,12 @@ DONE and pushed: A–E, U, P1–P5, T1, I4 (scheduler), M1–M2 (Gmail), HR1, G0
 NEXT: R1+R2 DONE. Real samples captured 14:00 into tests/fixtures/upwork/ (list_proposals, get_proposal, invitations_empty, freelancer_dashboard, find_freelancers_search; facts in its README). R3 DONE 14:11, X1 14:20, X2 14:28, X3 (alerts, charts, can't afford, JSS guard safety.jss_guard) 14:45. H1 DONE 14:55 (app/upwork/writes.py: WRITE_TOOLS, ClaudeUpworkWriter one tool per run, UserClick via issue_click in POST routes only, check_existing, preview_proposal, remake_preview, confirm_preview with dry-run block, migration 014 previews). H1 choices accepted by manager: confirm refuses until mark_asked() records that the user was asked about attachments + highlights (writes.require_asked_flags=true); boost only after a preview showed the boost range; kill switch blocks writes. H2 must use these, not bypass them.
 NEXT: H2 (job detail Edit draft / Prepare / Approve / Skip UI on top of writes.py, ask attachments + highlights (get_profile list_highlights) then mark_asked, show connects_cost + balance + boost block + unmet qualifications, remake expired previews), then H3, KW, O, L, I, J, K.
 Open human items: Gmail live test; build USER.md from /context and click "Use this"; D9/D10/D11 later.
+- D9 ANSWERED 2026-11-06: (a) no auto-apply. Every profile write = one click; add 'Approve all small changes' batch button.
+- BUILDER MODEL 2026-11-06 (user): all remaining builders use model sonnet (Sonnet 5.5), effort medium.
+
+## Status 2026-11-06 18:10 (manager, paused by user after L1)
+DONE since 13:25: R1-R3, X1-X3, H1-H3, KW1, O1 (profile versions + rollback previews), O2 (playbook + experiments, /playbook), O3 (profile test loop, pick/draft/approve, confirm via second click on history page, judge_due, "Approve all small changes"), L1 (app/memory.py cap 3,500 chars, migration 020 FTS5 search_idx, search()).
+Checks at L1: 1238 tests local + Docker, ruff check + format clean. Nothing committed.
+UNVERIFIED live: update_profile param names (title/overview/skills); get_messages fixture shape; JSS read.
+NEXT: L2 (git versioning of /data/memory + /data/skills), L3, L4, L5 (needs D11), then I, J, K.
+Open human items: D10 (approve keywords in /approvals after a "Find keywords" run), D11 (weekly web search, before L5), Gmail live test, USER.md build, git commit of all work.

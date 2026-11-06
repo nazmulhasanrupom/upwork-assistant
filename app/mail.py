@@ -26,6 +26,8 @@ log = logging.getLogger("mail")
 
 EVENTS = (
     "high_job",
+    "keywords_ready",
+    "profile_change_ready",
     "after_send_review",
     "invite",
     "invite_reminder",

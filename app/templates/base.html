@@ -1,7 +1,7 @@
 {% from "_macros.html" import button %}
 {% set path = request.url.path if request else "" %}
-{% macro nav_link(href, label, active) -%}
-<a href="{{ href }}"{% if active %} aria-current="page"{% endif %}>{{ label }}</a>
+{% macro nav_link(href, label, active, count=0) -%}
+<a href="{{ href }}"{% if active %} aria-current="page"{% endif %}>{{ label }}{% if count %} <span class="nav-count" aria-label="{{ count }} waiting">{{ count }}</span>{% endif %}</a>
 {%- endmacro %}
 <!doctype html>
 <html lang="en">
@@ -22,9 +22,13 @@
       <nav aria-label="Main">
         {{ nav_link("/", "Dashboard", path == "/") }}
         {{ nav_link("/jobs", "Jobs", path.startswith("/jobs")) }}
+        {{ nav_link("/approvals", "Approvals", path.startswith("/approvals"), approvals_pending() if approvals_pending is defined else 0) }}
+        {{ nav_link("/inbox", "Inbox", path.startswith("/inbox")) }}
         {{ nav_link("/review", "Review", path.startswith("/review")) }}
         {{ nav_link("/runs", "Runs", path.startswith("/runs")) }}
         {{ nav_link("/context", "Profile", path.startswith("/context")) }}
+        {{ nav_link("/profile/versions", "Profile history", path.startswith("/profile")) }}
+        {{ nav_link("/playbook", "Playbook", path.startswith("/playbook")) }}
         {{ nav_link("/upwork", "Upwork", path.startswith("/upwork")) }}
         {{ nav_link("/settings/email", "Email", path.startswith("/settings")) }}
       </nav>

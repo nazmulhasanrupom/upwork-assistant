@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, copy_button, flash, pill %}
+{% block title %}Inbox{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Invites and messages</h1>
+  <p class="muted">Read-only. "Draft reply" asks Claude for a draft you copy and post by hand on Upwork. Nothing is sent from here.</p>
+</div>
+
+{% if notice %}{{ flash(notice[0], notice[1] ~ (" Claude cost: $" ~ "%.4f"|format(cost) if cost is not none else "")) }}{% endif %}
+
+<section aria-labelledby="in-invites">
+  <h2 id="in-invites">Invitations waiting <span class="count">{{ invites | length }}</span></h2>
+  {% if invites %}
+  <ul class="inbox-list">
+    {% for i in invites %}
+    <li class="card" id="invite-{{ loop.index }}">
+      <div class="card-head">{{ pill("Invite", "warn") }} <span class="muted small">first seen {{ i.first_seen | dt }}</span></div>
+      <h3 class="card-job-title">{{ i.title }}</h3>
+      <div class="actions">
+        {% if i.link %}{{ button("Open on Upwork", "secondary", href=i.link, small=true, external=true) }}{% endif %}
+        <form method="post" action="/inbox/invite/{{ i.invite_id | urlencode }}/draft" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {{ button("Draft reply", "primary", small=true) }}
+        </form>
+      </div>
+      {% if i.draft %}
+      <div class="reply-draft">
+        <h4>Draft reply <span class="muted small">{{ i.draft_at | dt }}</span></h4>
+        <pre class="text" id="draft-i{{ loop.index }}">{{ i.draft }}</pre>
+        {{ copy_button("draft-i" ~ loop.index) }}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No invitation is waiting. The daily run looks for new ones.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="in-rooms">
+  <h2 id="in-rooms">Messages <span class="count">{{ rooms | length }}</span></h2>
+  <form method="post" action="/inbox/refresh" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Read messages from Upwork", "secondary", small=true) }}
+    <span class="muted small">{% if fetched_at %}Last read {{ fetched_at | dt }}.{% else %}Not read yet.{% endif %} One cheap read, no write.</span>
+  </form>
+  {% if rooms %}
+  <ul class="inbox-list">
+    {% for r in rooms %}
+    <li class="card" id="room-{{ loop.index }}">
+      <div class="card-head">
+        {% if r.awaiting == "you" %}{{ pill("Waiting for you", "warn") }}{% elif r.awaiting == "them" %}{{ pill("Waiting for client") }}{% endif %}
+        {% if r.unread %}{{ pill(r.unread ~ " unread", "bad") }}{% endif %}
+        <span class="muted small">{{ r.last_at | dt }}</span>
+      </div>
+      <h3 class="card-job-title">{{ r.topic }}</h3>
+      {% if r.last_text %}<p class="message-text"><strong>{{ r.last_from or "Last message" }}:</strong> {{ r.last_text }}</p>{% endif %}
+      <div class="actions">
+        {% if r.link %}{{ button("Open on Upwork", "secondary", href=r.link, small=true, external=true) }}{% endif %}
+        <form method="post" action="/inbox/room/{{ r.room_id | urlencode }}/draft" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {{ button("Draft reply", "primary", small=true) }}
+        </form>
+      </div>
+      {% if r.draft %}
+      <div class="reply-draft">
+        <h4>Draft reply <span class="muted small">{{ r.draft_at | dt }}</span></h4>
+        <pre class="text" id="draft-r{{ loop.index }}">{{ r.draft }}</pre>
+        {{ copy_button("draft-r" ~ loop.index) }}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No chat room is stored yet. Click "Read messages from Upwork".</p>
+  {% endif %}
+</section>
+{% endblock %}

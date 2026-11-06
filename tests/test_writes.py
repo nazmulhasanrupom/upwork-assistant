@@ -321,7 +321,7 @@ def test_audit_row_even_when_claude_fails(fake_claude_stream, conn, config, sett
         ("confirm_preview", {"action": "confirm", "org_uid": ORG,
                              "params": {"type": "proposal", "preview_id": "p", "extra": 1}}),
         ("confirm_preview", {"action": "confirm", "org_uid": ORG,
-                             "params": {"type": "profile", "preview_id": "p"}}),
+                             "params": {"type": "contract", "preview_id": "p"}}),
         ("confirm_preview", {"action": "confirm", "org_uid": ORG,
                              "params": {"type": "proposal"}}),
         ("confirm_preview", {"action": "cancel", "org_uid": ORG,
@@ -335,7 +335,7 @@ def test_only_the_two_tools_with_allowed_actions(fake, writer, tool, args):
 
 
 def test_write_tools_are_exactly_two():
-    assert writes.WRITE_TOOLS == ("manage_proposals", "confirm_preview")
+    assert writes.WRITE_TOOLS == ("manage_proposals", "confirm_preview", "update_profile")
     assert set(writes.WRITE_TOOLS).isdisjoint(bridge.READ_TOOLS)
     with pytest.raises(WriteRefused):
         writes.build_command("p", "find_jobs", "m", 4, 0.25)

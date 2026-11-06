@@ -85,6 +85,16 @@ def _parse(value: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _interval_passed(settings: Settings, name: str, now: datetime) -> bool:
+    """`profile_test` is checked every day but runs only when `profile_loop.every_days` have passed
+    since `profile_loop.last_run` (written by the task)."""
+    last = _parse(settings.get("profile_loop.last_run"))
+    if last is None:
+        return True
+    days = float(settings.get("profile_loop.every_days"))
+    return now - last >= timedelta(days=days)
+
+
 def tick(
     settings: Settings,
     config: Config,
@@ -99,7 +109,7 @@ def tick(
 
     zone = _zone(config, settings)
     grace = timedelta(minutes=float(settings.get("schedules.grace_minutes")))
-    for name in trigger.TASKS:
+    for name in trigger.TASKS + trigger.SCHEDULED_MANUAL:
         if not trigger.is_built(name):
             continue
         expr = settings.get(f"schedules.{name}")
@@ -117,6 +127,9 @@ def tick(
             log.warning("Missed slot %s for %s is older than the grace time: skipped", stamp, name)
             settings.set(key, stamp)
             result.skipped.append(name)
+            continue
+        if name in trigger.SCHEDULED_MANUAL and not _interval_passed(settings, name, now):
+            settings.set(key, stamp)  # not due yet (plan O3): this slot is handled
             continue
         try:
             trigger.start(config, name)

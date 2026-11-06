@@ -143,12 +143,11 @@ def test_style_equal_to_default_or_blank_removes_the_file(web, config):
     assert not style.exists()
 
 
-def test_count_over_cap_warns(web, config):
+def test_over_cap_save_is_refused(web, config):
     _, client = web
     r = post(client, "/context", user_md="a" * 3600, style_md="")
-    assert "3600 + MEMORY.md 0 = 3600 of 3500" in r.text
-    assert "Over the cap by 100" in r.text and "over the 3500 character cap" in r.text
-    assert user_file(config).read_text().strip() == "a" * 3600  # warns, still saves
+    assert r.status_code == 400 and "over the 3500 character cap" in r.text
+    assert not user_file(config).exists()
 
 
 def test_count_includes_memory_md(web, config):

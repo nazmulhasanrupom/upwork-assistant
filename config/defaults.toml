@@ -86,6 +86,11 @@ average_days = 7                # window of the average helper (used by rank and
 card_days = 7                   # the dashboard "This week" card sums invites over this many days
 profile_views_max = 1000000     # biggest number the profile views box accepts
 
+[profile_versions]        # SPEC2 4.C phase 2, plan O1 (saved copies of my Upwork profile)
+daily = true                    # the daily run saves a copy (only when the content changed)
+keep = 200                      # newest versions kept (older rows and files are deleted)
+diff_max_chars = 20000          # longest text the history page diffs (longer is cut)
+
 [rank]                    # SPEC2 4.C, plan X2 (keyword rank, one check per local day)
 enabled = true                  # the daily run checks the rank once a day
 run_hour_local = 6              # first daily run at or after this local hour does the check
@@ -96,11 +101,27 @@ average_days = 7                # window of the average on the dashboard
 max_mcp_calls = 32              # rank's own MCP call budget per run (counted apart from upwork.max_mcp_calls_per_run)
 keywords = ["n8n automation", "AI automation", "AI agent developer", "Make.com", "Zapier", "RAG chatbot", "Python automation", "workflow automation"]   # seed list; Phase KW replaces it with the approved ones
 
+[keywords]                # plan KW1 (SPEC2 4.C phase 0): find the 3 to 5 keywords to rank for. Run by hand, never scheduled.
+seeds = ["n8n automation", "AI automation", "AI agent developer", "Make.com", "Zapier", "RAG chatbot", "Python automation", "workflow automation"]   # start list; edit it in the settings table
+max_seeds = 12                  # at most this many seeds are measured
+max_mcp_calls = 60              # this task's own MCP call budget (counted apart from upwork.max_mcp_calls_per_run)
+jobs_limit = 5                  # jobs asked per find_jobs search (only the total_matching number is used)
+rank_pages = 2                  # freelancer pages read per seed (also gives the total number of freelancers and my place)
+min_picks = 3                   # Claude must pick at least this many seeds, else no approval item is made
+max_picks = 5                   # Claude's list is cut to this many
+reason_max_chars = 200          # a reason is cut to this
+pick_max_turns = 4
+pick_max_budget_usd = 1.00
+pick_timeout_seconds = 600
+baseline_days = 14              # after the keywords are approved, no profile change for this many days
+baseline_started = ""           # local date (YYYY-MM-DD) the owner approved the keywords; set by the approval, "" = never
+
 [schedules]               # SPEC 9, cron in the configured time zone
 daily = "0 */2 * * *"
 digest = "0 21 * * *"
 weekly = "0 6 * * 1"
 monthly = "0 7 1 * *"
+profile_test = "30 7 * * *"     # plan O3: checked every day, but a test is only started when profile_loop.every_days have passed
 scheduler_interval_minutes = 5
 grace_minutes = 30        # a slot missed by more than this is skipped, not replayed (plan I4)
 
@@ -109,6 +130,7 @@ daily = ""
 digest = ""
 weekly = ""
 monthly = ""
+profile_test = ""
 
 [models]                  # SPEC 4.4, 7.2
 think = "claude-opus-5-5"
@@ -183,6 +205,40 @@ timeout_seconds = 300
 cover_letter_max_chars = 5000   # Upwork limit; longer is refused, never cut
 require_asked_flags = true      # confirm needs "asked about attachments" and "asked about highlights" (Upwork rule)
 existing_check_limit = 25       # proposals read when checking for an existing proposal (max 25)
+highlights_max_shown = 30       # plan H2: most highlights (portfolio, certificates, past jobs) listed on the job page
+answer_max_chars = 5000         # plan H2: longest screening answer the edit form saves (never cut, refused)
+
+[playbook]                # SPEC2 6, plan O2 (tactic playbook and experiments)
+test_days = 14                  # a test runs this many days before it is judged
+baseline_metrics = ["jss", "invites_new", "proposals_sent", "proposals_viewed", "interviews", "hires"]   # metrics_daily columns saved as the baseline of a test
+result_max_chars = 500          # a test result is cut to this
+experiments_shown = 20          # most experiments listed on the page
+
+[profile_loop]            # plan O3 (SPEC2 4.C phase 2): the profile test loop. Every change is one user click (D9).
+every_days = 14                 # the scheduler starts a new test at most this often
+last_run = ""                   # UTC ISO time of the last attempt; written by the task
+writable_tactics = [1, 2, 3, 4, 9]   # playbook tactic numbers that the write tools can do (title, overview, skills)
+eligible_statuses = ["untested"]     # only tactics with one of these statuses are offered to Opus
+allowed_types = ["Ask first", "Auto"]   # playbook Type values that may be tested (Alert and Manual never)
+top_keywords = 1                # approved keywords searched for the top profiles (the first ones)
+top_n = 10                      # profiles in the competitor summary
+max_mcp_calls = 12              # this task's own MCP call budget
+title_max_chars = 70            # Upwork title limit; a longer draft is refused, never cut
+description_max_chars = 5000    # overview limit
+skills_max = 20                 # skill slots
+skill_max_chars = 50            # longest skill name
+copy_max_words = 5              # a draft that repeats this many words in a row from a competitor title is refused
+pick_max_turns = 4
+pick_max_budget_usd = 1.00
+pick_timeout_seconds = 600
+draft_max_turns = 4
+draft_max_budget_usd = 0.50
+draft_timeout_seconds = 600
+reason_max_chars = 300
+small_change_max_words = 40     # "Approve all small changes": a change with at most this many added plus removed words
+batch_confirms = true           # the batch click also confirms each preview (still blocked by dry-run)
+change_pct = 10.0               # judge: a 7-day average must move this many percent to count
+jss_drop_points = 3.0           # judge: a JSS drop of this many points is "hurt" at once
 
 [safety]                  # plan HR1/X3: switches the agent may set but never clear
 jss_guard = false               # set when the JSS drops; stops Phase O profile tests. Only the owner clears it.
@@ -214,6 +270,8 @@ digest_max_jobs = 15            # jobs listed in the digest email, best fit firs
 
 [email.events]            # one switch per email (SPEC 11); all on by default
 high_job = true
+keywords_ready = true           # the keyword pick waits on /approvals
+profile_change_ready = true     # a profile test change waits on /approvals
 after_send_review = true
 invite = true                   # new invite, right away
 invite_reminder = true          # the same invite is still not answered (alerts.invite_reminder_hours)
@@ -227,6 +285,17 @@ cannot_do = true
 digest = true
 weekly = true
 monthly = true
+
+[approvals]               # plan H3: the approvals queue (/approvals)
+expire_days = 30                # a generic item nobody decided on for this long is marked expired
+
+[inbox]                   # plan H3: invites and messages page (/inbox). Replies are drafted, never sent.
+rooms_limit = 10                # chat rooms asked for in one get_messages read
+text_max_chars = 2000           # a message is cut to this before it goes to Claude (and is shown)
+reply_max_chars = 3000          # a drafted reply is cut to this
+reply_max_turns = 4
+reply_max_budget_usd = 0.30
+reply_timeout_seconds = 300
 
 [security]                # SPEC 10.4
 max_login_tries = 5           # wrong tries before the login locks

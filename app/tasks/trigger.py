@@ -22,7 +22,9 @@ from app.tasks import lock
 
 log = logging.getLogger("trigger")
 
-TASKS = ("daily", "digest", "weekly", "monthly")
+TASKS = ("daily", "digest", "weekly", "monthly")  # scheduled tasks (and Run now on the dashboard)
+MANUAL_TASKS = ("keywords", "profile_test")  # started by a button (plan KW1, O3)
+SCHEDULED_MANUAL = ("profile_test",)  # also started by the scheduler, but only when it is due (O3)
 PACKAGE = "app.tasks"  # tests point this at a fake package
 ROOT = Path(__file__).resolve().parent.parent.parent  # /app in the image
 
@@ -33,7 +35,7 @@ class NotBuilt(Exception):
 
 def is_built(name: str) -> bool:
     """The module exists and has a main()."""
-    if name not in TASKS:
+    if name not in TASKS + MANUAL_TASKS:
         return False
     module_name = f"{PACKAGE}.{name}"
     try:
@@ -83,7 +85,7 @@ def start(config: Config, name: str) -> Path:
 def running(config: Config) -> dict[str, str]:
     """Tasks whose lock is held now: name -> start time (ISO, or '' if not written yet)."""
     out: dict[str, str] = {}
-    for name in TASKS:
+    for name in TASKS + MANUAL_TASKS:
         since = lock.running_since(config.data_dir, name)
         if since is not None:
             out[name] = since

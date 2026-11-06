@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import charts
+from app import charts, job_actions
 from app import costs as cost_totals
 from app import metrics as metrics_data
 from app import rank as rank_data
@@ -319,7 +319,7 @@ def runs_partial(request: Request) -> Response:
 @router.post("/tasks/{name}/run")
 def run_task(request: Request, name: str) -> Response:
     """Start a task now, detached. Login + CSRF are checked by the app-wide guard."""
-    if name not in TASKS:
+    if name not in TASKS and name not in trigger.MANUAL_TASKS:
         raise HTTPException(status_code=404, detail="Unknown task")
     app = request.app
     if app.state.settings.get("general.kill_switch"):
@@ -470,8 +470,23 @@ def jobs_list(
 
 
 @router.get("/jobs/{job_id}")
-def job_detail(request: Request, job_id: str) -> Response:
+def job_detail(request: Request, job_id: str, msg: str = "") -> Response:
+    return job_page(request, job_id, notice=job_actions.JOB_MESSAGES.get(msg))
+
+
+def job_page(
+    request: Request,
+    job_id: str,
+    *,
+    notice: tuple[str, str] | None = None,
+    status: int = 200,
+    edit: dict[str, Any] | None = None,
+    edit_dashes: bool = False,
+) -> Response:
+    """The job page. `notice` is (kind, text) for the flash on top; `edit` re-opens the draft form
+    with what the user typed (plan H2)."""
     conn: sqlite3.Connection = request.app.state.db
+    settings = request.app.state.settings
     row = conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -482,10 +497,11 @@ def job_detail(request: Request, job_id: str) -> Response:
     details = _json(row["details"], {})
     if not isinstance(details, dict):
         details = {}
-    fit_min = int(request.app.state.settings.get("pay.fit_min"))
+    fit_min = int(settings.get("pay.fit_min"))
     return render(
         request,
         "job_detail.html",
+        status,
         job=dict(row),
         flags=_json(row["red_flags"], []),
         details=details,
@@ -493,6 +509,12 @@ def job_detail(request: Request, job_id: str) -> Response:
         draft=draft_view(draft),
         draft_note=draft_note(request, row, judgement, draft, fit_min),
         link=upwork_link(row["url"], row["job_id"]),
+        notice=notice,
+        act=job_actions.build_view(conn, settings, row, draft),
+        edit=edit,
+        edit_dashes=edit_dashes,
+        max_letter=int(settings.get("writes.cover_letter_max_chars")),
+        max_answer=int(settings.get("writes.answer_max_chars")),
     )
 
 

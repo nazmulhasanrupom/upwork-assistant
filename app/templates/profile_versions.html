@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, flash, pill %}
+{% block title %}Profile history{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Profile history</h1>
+  <p class="muted">Saved copies of your Upwork profile (title, overview, skills, rate). A copy is saved every day and before any change, only when something changed. The newest {{ keep }} are kept. "Roll back" asks for your approval first and never changes Upwork by itself.{% if dry_run %} Dry-run is on.{% endif %}</p>
+</div>
+
+{% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
+
+<section aria-labelledby="pv-versions">
+  <h2 id="pv-versions">Versions <span class="count">{{ versions | length }}</span></h2>
+  <form method="post" action="/profile/versions/snapshot" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Save a copy now", "secondary", small=true) }}
+    <span class="muted small">One read of your profile from Upwork. No write.</span>
+  </form>
+  {% if versions %}
+  <div class="table-wrap">
+  <table class="table" id="profile-versions">
+    <thead><tr>
+      <th scope="col">Saved</th><th scope="col">Why</th><th scope="col">Title</th><th scope="col" class="num">Skills</th><th scope="col">Compare</th><th scope="col">Action</th>
+    </tr></thead>
+    <tbody>
+    {% for v in versions %}
+    <tr{% if v.id == new_id or v.id == old_id %} aria-current="true"{% endif %}>
+      <th scope="row">{{ v.created_at | dt }}{% if v.id == newest_id %} {{ pill("newest", "ok") }}{% endif %}</th>
+      <td>{{ v.reason }}</td>
+      <td>{{ v.title }}</td>
+      <td class="num">{{ v.skills_count }}</td>
+      <td>
+        {% if not loop.first %}<a href="/profile/versions?a={{ v.id }}&amp;b={{ newest_id }}">vs newest</a>{% endif %}
+        {% if not loop.last %}{% if not loop.first %} · {% endif %}<a href="/profile/versions?a={{ versions[loop.index0 + 1].id }}&amp;b={{ v.id }}">vs previous</a>{% endif %}
+      </td>
+      <td>
+        {% if v.id != newest_id %}
+        <form method="post" action="/profile/versions/{{ v.id }}/rollback" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {{ button("Roll back", "secondary", small=true) }}
+        </form>
+        {% else %}<span class="muted small">current</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No copy is saved yet. The daily run saves one, or click "Save a copy now".</p>
+  {% endif %}
+</section>
+
+{% if compare %}
+<section aria-labelledby="pv-diff" id="profile-diff">
+  <h2 id="pv-diff">Changes</h2>
+  <p class="muted">From the version of {{ compare.old.created_at | dt }} to the version of {{ compare.new.created_at | dt }}. Removed text is struck through (red), added text is underlined (green).</p>
+  {% for f in compare.fields %}
+  <h3>{{ f.label }}{% if not f.changed %} <span class="muted small">no change</span>{% else %} <span class="muted small">+{{ f.added_words }} / -{{ f.removed_words }} words</span>{% endif %}</h3>
+  {% if f.changed %}
+  <div class="difftext" id="diff-{{ f.field }}">{% for kind, text in f.ops %}{% if kind == "ins" %}<ins>{{ text }}</ins>{% elif kind == "del" %}<del>{{ text }}</del>{% else %}{{ text }}{% endif %}{% endfor %}</div>
+  {% if not f.restorable %}<p class="muted small">The hourly rate is shown here, but a roll back cannot restore it.</p>{% endif %}
+  {% endif %}
+  {% endfor %}
+</section>
+{% elif versions | length > 1 %}
+<p class="muted">Pick "vs previous" or "vs newest" on a row to see what changed.</p>
+{% endif %}
+
+<section aria-labelledby="pv-previews" id="previews">
+  <h2 id="pv-previews">Profile change previews <span class="count">{{ previews | length }}</span></h2>
+  {% if previews %}
+  <div class="table-wrap">
+  <table class="table" id="profile-previews">
+    <thead><tr><th scope="col">Field</th><th scope="col">Status</th><th scope="col">Made</th><th scope="col">For</th><th scope="col">Action</th></tr></thead>
+    <tbody>
+    {% for p in previews %}
+    <tr>
+      <th scope="row">{{ p.label }}</th>
+      <td>{% if p.status == "previewed" %}{{ pill("Preview ready", "ok") }}{% else %}{{ pill("Failed", "bad") }} <span class="small">{{ p.message }}</span>{% endif %}</td>
+      <td>{{ p.created_at | dt }}</td>
+      <td class="small">{{ p.item_title }}</td>
+      <td>{% if p.confirm_status == "confirmed" %}{{ pill("Live", "ok") }}{% elif p.confirmable %}<form method="post" action="/profile/previews/{{ p.id }}/confirm" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ button("Confirm: change my profile", "primary", small=true) }}</form>{% if p.confirm_status == "dry_run_blocked" %} <span class="small muted">blocked by dry-run</span>{% endif %}{% elif p.status == "previewed" %}<span class="small muted">too old, approve again</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted small">A preview changes nothing on your profile. Confirming is a separate click, the second one after you approve the item: use the Confirm button on a good preview below. Nothing is applied until then.{% if dry_run %} Dry-run is on, so a confirm would be blocked anyway.{% endif %}</p>
+  {% else %}
+  <p class="muted">No preview yet. "Roll back" on a version, or a profile test change, adds an item to <a href="/approvals">Approvals</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

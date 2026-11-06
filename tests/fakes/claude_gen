@@ -15,6 +15,23 @@ Knobs (env):
   FAKE_GEN_FAIL=1     return text that is not JSON
   FAKE_GEN_OMIT=ID    leave this job id out of the answer
 
+Reply task ("# Task: draft reply", plan H3): answers {"reply": ...}. FAKE_REPLY_EM=1 puts em and
+en dashes in it, FAKE_REPLY_EMPTY=1 answers without text.
+
+Pick task ("# Task: pick keywords", plan KW1): picks the first FAKE_PICK_N (default 4) keywords of
+the input list, best first, with a reason each. Knobs: FAKE_PICK_UNKNOWN=1 adds a keyword that is
+not in the input list first, FAKE_PICK_DUP=1 repeats the first pick, FAKE_PICK_EM=1 puts an em dash
+in the reasons, FAKE_PICK_BAD=1 answers without a list, FAKE_PICK_CASE=1 changes the case.
+
+Tactic task ("# Task: pick tactic", plan O3): picks tactic FAKE_TACTIC_NO (default: the first
+candidate) for the field FAKE_TACTIC_FIELD (default title). FAKE_TACTIC_BAD=1 answers without a
+tactic, FAKE_TACTIC_EM=1 puts an em dash in the reason, FAKE_TACTIC_FAIL=1 picks a number that is
+not a candidate.
+Draft task ("# Task: draft profile change", plan O3): writes the new value for the field.
+FAKE_DRAFT_TEXT overrides the text (a JSON list for skills), FAKE_DRAFT_EM=1 puts an em dash in,
+FAKE_DRAFT_NUM=1 adds a number that is in no source, FAKE_DRAFT_HTML=1 adds markup,
+FAKE_DRAFT_SAME=1 returns the current value, FAKE_DRAFT_BAD=1 answers without a value.
+
 Review task ("# Task: review proposal", plan R2) knobs:
   FAKE_REVIEW_EM=1      em dashes in the fixed version and the issues
   FAKE_REVIEW_NEWNUM=1  the fixed version adds a number that is in no source
@@ -41,6 +58,14 @@ task = (
     if "# Task: build USER.md" in prompt
     else "review"
     if "# Task: review proposal" in prompt
+    else "reply"
+    if "# Task: draft reply" in prompt
+    else "pick"
+    if "# Task: pick keywords" in prompt
+    else "tactic"
+    if "# Task: pick tactic" in prompt
+    else "draftchange"
+    if "# Task: draft profile change" in prompt
     else "write"
 )
 data = json.load(open("input.json"))
@@ -112,7 +137,59 @@ def raw_job(entry):
 
 
 out = {}
-if task == "review":
+if task == "pick":
+    m = re.search(r"<keyword_data>\n(.*)\n</keyword_data>", data["keywords"], re.S)
+    names = [k["keyword"] for k in json.loads(m.group(1))]
+    chosen = names[: int(os.environ.get("FAKE_PICK_N", "4"))]
+    if os.environ.get("FAKE_PICK_CASE"):
+        chosen = [c.upper() for c in chosen]
+    if os.environ.get("FAKE_PICK_DUP") and chosen:
+        chosen.append(chosen[0])
+    if os.environ.get("FAKE_PICK_UNKNOWN"):
+        chosen.insert(0, "totally unknown keyword")
+    sep = f" {EM} " if os.environ.get("FAKE_PICK_EM") else ", "
+    out = {"keywords": [{"keyword": c, "reason": f"Good demand{sep}fair competition."} for c in chosen]}
+    if os.environ.get("FAKE_PICK_BAD"):
+        out = {"nope": 1}
+elif task == "tactic":
+    no = int(os.environ.get("FAKE_TACTIC_NO") or (data["candidates"][0]["no"] if data["candidates"] else 0))
+    if os.environ.get("FAKE_TACTIC_FAIL"):
+        no = 999
+    reason = f"Views are low {EM} test it." if os.environ.get("FAKE_TACTIC_EM") else "Views are low, so test it."
+    out = {"tactic_no": no, "field": os.environ.get("FAKE_TACTIC_FIELD", "title"), "reason": reason}
+    if os.environ.get("FAKE_TACTIC_BAD"):
+        out = {"nope": 1}
+elif task == "draftchange":
+    field_name = data["field"]
+    cur = data["current"]
+    override = os.environ.get("FAKE_DRAFT_TEXT")
+    summary = f"Changed the {field_name}."
+    if field_name == "skills":
+        skills = json.loads(override) if override else list(cur) + ["Zapier"]
+        if os.environ.get("FAKE_DRAFT_SAME"):
+            skills = list(cur)
+        out = {"field": "skills", "skills": skills, "summary": summary}
+    else:
+        text = override if override else f"New {field_name}: n8n automation expert"
+        if os.environ.get("FAKE_DRAFT_SAME"):
+            text = cur
+        if os.environ.get("FAKE_DRAFT_EM"):
+            text += f" {EM} fast"
+        if os.environ.get("FAKE_DRAFT_NUM"):
+            text += " 87% faster"
+        if os.environ.get("FAKE_DRAFT_HTML"):
+            text += " <b>bold</b>"
+        out = {"field": field_name, "text": text, "summary": summary}
+    if os.environ.get("FAKE_DRAFT_BAD"):
+        out = {"nope": 1}
+elif task == "reply":
+    m = re.search(r"<untrusted_message>\n(.*)\n</untrusted_message>", data["message"], re.S)
+    seen = m.group(1) if m else ""
+    text = f"Thanks for the message. I will look at it today. ({len(seen)} chars read)"
+    if os.environ.get("FAKE_REPLY_EM"):
+        text = f"Thanks {EM} I will look at it today{EM}fast. Range 5{EN}10."
+    out = {} if os.environ.get("FAKE_REPLY_EMPTY") else {"reply": text}
+elif task == "review":
     m = re.search(r"<draft>\n(.*)\n</draft>", data["draft"], re.S)
     draft = json.loads(m.group(1))
     cover = draft["cover_letter"]

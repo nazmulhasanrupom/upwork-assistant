@@ -15,16 +15,14 @@ All POSTs need login + CSRF (the app-wide guard).
 from __future__ import annotations
 
 import logging
-import os
 import re
-import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import Response
 
+from app import memory
 from app.auth_routes import render
 from app.config import Config
 from app.llm import judging, prompting
@@ -35,6 +33,7 @@ from app.llm.runner import (
     ClaudeRateLimited,
     run_claude,
 )
+from app.memory import atomic_write, memory_file, normalize, read_file
 from app.upwork import accounts
 from app.upwork.client import UpworkAuthError, UpworkMCPError
 from app.upwork.routes import bridge_for
@@ -61,58 +60,8 @@ class BuildError(RuntimeError):
 # ---------------------------------------------------------------- files
 
 
-def memory_file(config: Config, name: str) -> Path:
-    return config.memory_dir / name
-
-
-def read_file(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-
-
-def atomic_write(path: Path, text: str) -> None:
-    """Write to a temp file in the same folder, then rename over the target."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
-def normalize(text: str) -> str:
-    """One newline style, no trailing blanks at the end, one final newline if not empty."""
-    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    return text + "\n" if text else ""
-
-
 def counts(config: Config, settings: Any, user_text: str | None = None) -> dict[str, Any]:
-    """Characters of USER.md and MEMORY.md against the shared cap (SPEC2 5.1)."""
-    cap = int(settings.get("memory.total_cap_chars"))
-    user = len(
-        (user_text if user_text is not None else read_file(memory_file(config, "USER.md"))).strip()
-    )
-    memory = len(read_file(memory_file(config, "MEMORY.md")).strip())
-    total = user + memory
-    return {
-        "user": user,
-        "memory": memory,
-        "total": total,
-        "cap": cap,
-        "over": total > cap,
-        "percent": min(100, round(100 * total / cap)) if cap else 0,
-    }
+    return memory.usage(config, settings, user_text)
 
 
 # ---------------------------------------------------------------- profile to plain text
@@ -296,13 +245,15 @@ def context_save(request: Request, user_md: str = Form(""), style_md: str = Form
         )
     user_text, style_text = normalize(user_md), normalize(style_md)
     try:
-        atomic_write(memory_file(config, "USER.md"), user_text)
+        memory.write_memory_file(config, request.app.state.settings, "USER.md", user_text)
         style_path = memory_file(config, "style.md")
         default = prompting.default_style()
         if style_text.strip() and style_text.strip() != default:
             atomic_write(style_path, style_text)
         elif style_path.exists():
             style_path.unlink()  # empty or the default text: use the default again
+    except memory.OverCap as e:
+        return _page(request, 400, user_md=user_md, style_md=style_md, error=str(e))
     except OSError:
         log.exception("Could not save the profile context")
         return _page(
@@ -343,8 +294,10 @@ def context_use(request: Request, proposed: str = Form("")) -> Response:
     if _too_long(request, proposed):
         return _page(request, 413, error="That text is too long to save.")
     try:
-        atomic_write(memory_file(config, "USER.md"), normalize(proposed))
+        memory.write_memory_file(config, request.app.state.settings, "USER.md", normalize(proposed))
         memory_file(config, PROPOSED_NAME).unlink(missing_ok=True)
+    except memory.OverCap as e:
+        return _page(request, 400, error=str(e))
     except OSError:
         log.exception("Could not save USER.md")
         return _page(request, 500, error="Could not save. See the log.")

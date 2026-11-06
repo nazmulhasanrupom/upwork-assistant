@@ -317,6 +317,7 @@ pre.text {
   .stats { grid-template-columns: 1fr 1fr; gap: 12px; }
   .stats .stat:first-child { grid-column: 1 / -1; }
   .table th.num, .table td.num { display: none; }
+  .kw-table th.num, .kw-table td.num { display: table-cell; }
   .table td:nth-child(3) { white-space: nowrap; }
   .table td[colspan] { white-space: normal; }
   .card { padding: var(--s2); }
@@ -460,3 +461,31 @@ pre.logview {
 .chart-grid { list-style: none; margin: var(--s2) 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--s2); }
 .chart-title { margin: 0 0 var(--s1); font-size: 0.9375rem; }
 .cant-afford { white-space: nowrap; }
+
+/* ---- job page actions (plan H2) ---- */
+.inline-form { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s1); margin: 0; }
+.inline-field { display: inline-flex; flex-direction: column; gap: 2px; }
+.inline-field input:not([type="radio"]):not([type="checkbox"]) { width: 6rem; }
+#apply-actions { align-items: flex-end; }
+fieldset.choice { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--s1) var(--s2); margin: 0; display: flex; flex-direction: column; gap: 6px; }
+fieldset.choice legend { font-weight: 600; font-size: 0.9375rem; padding: 0 6px; }
+fieldset.choice label { display: flex; gap: 8px; align-items: flex-start; }
+.why-disabled { max-width: 28rem; }
+.btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+
+/* Approvals and inbox (plan H3) */
+.nav-count {
+  display: inline-block; min-width: 1.4em; padding: 0 0.4em; margin-left: 0.25em;
+  border-radius: 999px; background: var(--accent); color: var(--accent-text);
+  font-size: 0.75rem; font-weight: 650; line-height: 1.5; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.approval-list, .inbox-list { list-style: none; padding: 0; margin: var(--s2) 0; display: grid; gap: var(--s2); }
+.before-after { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s2); }
+.before-after h4, .reply-draft h4 { margin: 0 0 var(--s1); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.reply-draft { margin-top: var(--s2); }
+.message-text { overflow-wrap: anywhere; }
+
+/* Keyword discovery pick on /approvals (plan KW1) */
+.kw-table td:last-child { min-width: 14rem; }
+#keyword-discovery form.inline { margin-right: var(--s1); }

@@ -21,7 +21,8 @@ from datetime import UTC, datetime, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from app import alerts, mail, metrics, notes, rank
+from app import alerts, mail, memory, metrics, notes, profile_loop, rank
+from app import profile_versions as profile_versions_mod
 from app.config import Config, load_config
 from app.db import init_db
 from app.filters.flags import flags as red_flags
@@ -209,9 +210,13 @@ def _note_block(
     return "\n".join(lines) + "\n\n"
 
 
-def write_note(config: Config, now_local: datetime, block: str) -> None:
+def write_note(
+    config: Config, now_local: datetime, block: str, conn: sqlite3.Connection | None = None
+) -> None:
     """Append to memory/daily/YYYY-MM-DD.md (old notes/daily files are only read, see notes.py)."""
-    notes.append_note(config, now_local.strftime("%Y-%m-%d"), block)
+    day = now_local.strftime("%Y-%m-%d")
+    if notes.append_note(config, day, block) and conn is not None:
+        memory.index_note(conn, day, notes.read_note(config, day))
 
 
 # ---------------------------------------------------------------- after-send review (plan R3)
@@ -287,6 +292,56 @@ def metrics_part(
         f"proposals {row['proposals_sent']} sent / {row['proposals_viewed']} viewed / "
         f"{row['interviews']} interviews / {row['hires']} hires"
     ]
+
+
+# ---------------------------------------------------------------- profile copy (plan O1)
+
+
+def profile_versions_part(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    config: Config,
+    client: Any,
+    now: datetime,
+) -> list[str]:
+    """Save a copy of my profile when it changed. Returns lines for the daily note.
+
+    Never raises (a login problem is left to the other parts, it is only an alert here): an
+    error is logged and shown as the alert `profile_snapshot_failed`, the daily run stays ok."""
+    if not settings.get("profile_versions.daily"):
+        return []
+    try:
+        res = profile_versions_mod.snapshot(client, conn, settings, config, now, reason="daily")
+    except (BudgetCapReached, ClaudeRateLimited) as e:
+        return [f"Profile copy not saved (Claude limit): {e}"[:300]]
+    except Exception as e:
+        log.exception("Profile snapshot failed")
+        message = f"The daily profile copy failed: {type(e).__name__}: {e}"[:300]
+        conn.execute(
+            "INSERT INTO alerts(key, message, created_at) VALUES (?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET message = excluded.message",
+            (profile_versions_mod.ALERT_KEY, message, _iso(now)),
+        )
+        return [message]
+    conn.execute("DELETE FROM alerts WHERE key = ?", (profile_versions_mod.ALERT_KEY,))
+    if res.saved:
+        return [f"Profile copy saved (version {res.version_id})."]
+    return ["Profile unchanged since the last copy."]
+
+
+# ---------------------------------------------------------------- profile test judge (plan O3)
+
+
+def profile_loop_part(
+    conn: sqlite3.Connection, settings: Settings, config: Config, now: datetime
+) -> list[str]:
+    """Judge a profile test whose days are over. Never raises. Only queues an approval for a roll
+    back; it writes nothing to Upwork."""
+    try:
+        return profile_loop.judge_due(conn, settings, config, now)
+    except Exception as e:
+        log.exception("Profile test judge failed")
+        return [f"Profile test judge failed: {type(e).__name__}: {e}"[:300]]
 
 
 # ---------------------------------------------------------------- keyword rank (plan X2)
@@ -577,6 +632,8 @@ def run_daily(
         proposal_lines = after_send_part(conn, settings, config, client, run_id, now)
         snap: dict[str, Any] = {}
         metric_lines = metrics_part(conn, settings, config, client, now, snap)
+        metric_lines += profile_versions_part(conn, settings, config, client, now)
+        metric_lines += profile_loop_part(conn, settings, config, now)
         rank_lines = rank_part(conn, settings, config, client, now)
         oddities.extend(alerts_part(conn, settings, config, now, snap.get("row")))
         result.status = "ok"
@@ -610,6 +667,7 @@ def run_daily(
             metric_lines,
             rank_lines,
         ),
+        conn,
     )
     log.info(
         "daily %s: seen=%d kept=%d dropped=%d",

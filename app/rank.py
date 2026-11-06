@@ -106,16 +106,17 @@ class _State:
     done: bool = False
     position: int | None = None
     organic: int | None = None
+    total: int | None = None  # how many freelancers the search says exist (page 1 answer)
 
 
-def _scan(state: _State, rows: list[Any], my_key: str) -> bool:
-    """Walk one page of results. Returns True when my profile is in it."""
+def _scan(state: _State, rows: list[Any], my_key: str | None) -> bool:
+    """Walk one page of results. Returns True when my profile is in it (never without a key)."""
     for row in rows:
         if not isinstance(row, dict):
             continue
         state.seen += 1
         boosted = row.get("boosted") is True
-        if str(row.get("profile_key") or "").strip() == my_key:
+        if my_key and str(row.get("profile_key") or "").strip() == my_key:
             state.position = state.seen
             state.organic = state.seen - state.boosted
             return True
@@ -169,7 +170,28 @@ def _search_call(org_uid: str, state: _State, page_size: int) -> tuple[str, dict
     )
 
 
-def _store(conn: sqlite3.Connection, day: str, state: _State, now: datetime) -> dict[str, Any]:
+TOTAL_KEYS = ("total", "total_matching", "total_count", "totalCount", "total_results")
+
+
+def search_total(data: Any, rows: list[Any] | None = None) -> int | None:
+    """How many freelancers a search answer says exist. Upwork's field name is not captured yet,
+    so a few names are tried (top level, then under `data`). Without one, a last page
+    (`hasMore` false on the first page) means the rows seen are all there are. Else None."""
+    if not isinstance(data, dict):
+        return None
+    for holder in (data, data.get("data") if isinstance(data.get("data"), dict) else {}):
+        for key in TOTAL_KEYS:
+            value = holder.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+    if rows is not None and data.get("hasMore") is False:
+        return len(rows)
+    return None
+
+
+def _store(
+    conn: sqlite3.Connection, day: str, state: _State, now: datetime, *, save: bool = True
+) -> dict[str, Any]:
     row = {
         "date": day,
         "keyword": state.keyword,
@@ -179,6 +201,8 @@ def _store(conn: sqlite3.Connection, day: str, state: _State, now: datetime) -> 
         "total_seen": state.seen,
         "created_at": _iso(now),
     }
+    if not save:
+        return {**row, "total": state.total}
     conn.execute(
         "INSERT INTO rank_daily(date, keyword, position, organic_position, pages_checked, "
         "total_seen, created_at) VALUES (:date, :keyword, :position, :organic_position, "
@@ -188,7 +212,7 @@ def _store(conn: sqlite3.Connection, day: str, state: _State, now: datetime) -> 
         "total_seen = excluded.total_seen",
         row,
     )
-    return row
+    return {**row, "total": state.total}
 
 
 def check_ranks(
@@ -198,8 +222,17 @@ def check_ranks(
     now: datetime,
     *,
     tz: tzinfo | str | None = None,
+    keywords: list[str] | None = None,
+    store: bool = True,
+    max_pages: int | None = None,
+    allow_no_key: bool = False,
 ) -> RankResult:
     """Look up my place for every keyword and store one row per keyword for the local day.
+
+    Keyword discovery (plan KW1) reuses this with its own `keywords`, `store=False` (nothing goes
+    to rank_daily), its own `max_pages` and `allow_no_key=True` (no profile key = my place stays
+    empty, the search totals are still read). Each row also carries `total`: the number of
+    freelancers the first page says exist, or None.
 
     A keyword whose search fails is NOT stored (no row is better than a false "not found") and
     is listed in `failed`. Raises RankSkipped (no account / no profile key) and whatever the
@@ -208,25 +241,28 @@ def check_ranks(
     org_uid = str(settings.get("upwork.talent_org_uid") or "")
     if not org_uid:
         raise RankSkipped("No freelancer account is chosen yet (see the Upwork page).")
-    my_key = str(settings.get("metrics.profile_key") or "").strip()
-    if not my_key:
+    my_key: str | None = str(settings.get("metrics.profile_key") or "").strip()
+    if not my_key and allow_no_key:
+        my_key = None
+    elif not my_key:
         raise RankSkipped(
             "Your profile key is not known yet and could not be read from your Upwork "
             "profile. The next daily run tries again."
         )
-    keywords = approved_keywords(conn, settings)
+    if keywords is None:
+        keywords = approved_keywords(conn, settings)
     day = now.astimezone(_zone(tz, settings)).date().isoformat()
     result = RankResult(date=day)
     if not keywords:
         return result
 
     page_size = max(1, int(settings.get("rank.page_size")))
-    max_pages = max(1, int(settings.get("rank.max_pages")))
+    max_pages = max(1, int(settings.get("rank.max_pages") if max_pages is None else max_pages))
     states = [_State(k) for k in keywords]
 
     def finish(state: _State) -> None:
         state.done = True
-        result.rows.append(_store(conn, day, state, now))
+        result.rows.append(_store(conn, day, state, now, save=store))
 
     for _page in range(max_pages):
         active = [s for s in states if not s.done]
@@ -245,6 +281,8 @@ def check_ranks(
                 result.failed[state.keyword] = f"{type(e).__name__}: {e}"[:200]
                 log.info("Rank search failed for %r: %s", state.keyword, e)
                 continue
+            if state.pages == 1:
+                state.total = search_total(data, rows)
             if _scan(state, rows, my_key):
                 finish(state)
                 continue

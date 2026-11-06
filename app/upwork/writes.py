@@ -5,7 +5,8 @@ through headless Claude, like the read bridge (same subprocess / stream-json / m
 but with these extra rules. Tests in `tests/test_writes.py` prove each one.
 
 - `WRITE_TOOLS` is the only list of tools this module can ever allow, and it is NOT the read
-  bridge's list. The read bridge still refuses both tools.
+  bridge's list. The read bridge still refuses all of them. `update_profile` (plan O1) is for
+  PREVIEWS only: titles, overview and skills (`preview_profile_update`); it has no confirm yet.
   - `manage_proposals`: actions `create` and `accept_invitation` only.
   - `confirm_preview`: action `confirm`, types `proposal` and `proposal_accept_invitation` only,
     and nothing in `params` but `type` and `preview_id`.
@@ -68,12 +69,23 @@ TASK = "write"
 # The ONLY tools this module may ever allow (separate from bridge.READ_TOOLS).
 MANAGE_PROPOSALS = "manage_proposals"
 CONFIRM_PREVIEW = "confirm_preview"
-WRITE_TOOLS: tuple[str, ...] = (MANAGE_PROPOSALS, CONFIRM_PREVIEW)
+UPDATE_PROFILE = (
+    "update_profile"  # plan O1 previews; plan O3 confirms them (confirm_profile_preview)
+)
+WRITE_TOOLS: tuple[str, ...] = (MANAGE_PROPOSALS, CONFIRM_PREVIEW, UPDATE_PROFILE)
+# update_profile actions that may be previewed, and the one parameter each takes (the parameter
+# names follow the tool help; the preview shows the user what Upwork understood).
+PROFILE_ACTIONS: dict[str, tuple[str, str]] = {  # field -> (action, param)
+    "title": ("update_title", "title"),
+    "description": ("update_overview", "overview"),
+    "skills": ("set_skills", "skills"),
+}
 PREVIEW_ACTIONS: tuple[str, ...] = ("create", "accept_invitation")
 CONFIRM_ACTION = "confirm"
 CONFIRM_TYPES: dict[str, str] = {  # preview kind -> confirm_preview type
     "create": "proposal",
     "accept_invitation": "proposal_accept_invitation",
+    "profile": "profile",  # plan O3: a profile preview (the type name still has to be checked live)
 }
 
 DISALLOWED_TOOLS = (
@@ -228,6 +240,10 @@ def check_write_call(tool: str, args: dict[str, Any]) -> None:
     if not isinstance(params, dict) or not str(args.get("org_uid") or ""):
         raise WriteRefused("A write needs org_uid and params.")
     action = args.get("action")
+    if tool == UPDATE_PROFILE:
+        if action not in {a for a, _ in PROFILE_ACTIONS.values()}:
+            raise WriteRefused(f"update_profile action {action!r} is not allowed.")
+        return
     if tool == MANAGE_PROPOSALS:
         if action not in PREVIEW_ACTIONS:
             raise WriteRefused(f"manage_proposals action {action!r} is not allowed.")
@@ -764,6 +780,80 @@ def _make_preview(
     )
 
 
+@dataclass
+class ProfilePreview:
+    row_id: int
+    field: str
+    status: str  # previewed | failed
+    preview_id: str | None
+    message: str
+    run_id: str | None
+
+
+def preview_profile_update(
+    click: UserClick,
+    conn: sqlite3.Connection,
+    settings: Settings,
+    writer: ClaudeUpworkWriter,
+    field: str,
+    value: Any,
+    *,
+    approval_id: int | None = None,
+    version_id: int | None = None,
+) -> ProfilePreview:
+    """Ask Upwork for a PREVIEW of one profile change (title, description or skills) and store
+    it in `profile_previews`. It only previews: nothing is changed on Upwork and no
+    `confirm_preview` is made here. One claude run, one `update_profile` call."""
+    if field not in PROFILE_ACTIONS:
+        raise WriteRefused(f"The profile field {field!r} cannot be changed here.")
+    action, param = PROFILE_ACTIONS[field]
+    if field == "skills":
+        if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+            raise WriteRefused("Skills must be a list of names.")
+    elif not isinstance(value, str) or not value.strip():
+        raise WriteRefused(f"The new {field} is empty.")
+    args = {"action": action, "org_uid": _org(settings), "params": {param: value}}
+    call = writer.call(click, UPDATE_PROFILE, args)
+    res = call.result
+    payload = res.data() if not res.is_error else res.text
+    preview_id = None if res.is_error else _find(payload, "preview_id", "previewId")
+    preview_id = str(preview_id) if preview_id not in (None, "") else None
+    ok = not res.is_error and preview_id is not None
+    message = ""
+    if res.is_error:
+        message = res.text.strip()[:300] or "The preview failed."
+    elif preview_id is None:
+        message = "Upwork gave no preview_id."
+    if call.extra_calls:
+        message = (message + " Claude made extra write calls; check the run log.").strip()
+    cur = conn.execute(
+        "INSERT INTO profile_previews(approval_id, version_id, field, action, preview_id, "
+        "request_json, response_json, status, message, created_at, run_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            approval_id,
+            version_id,
+            field,
+            action,
+            preview_id if ok else None,
+            _jdump(args),
+            _jdump(payload),
+            "previewed" if ok else "failed",
+            message,
+            _iso(datetime.now(UTC)),
+            call.run_id,
+        ),
+    )
+    return ProfilePreview(
+        int(cur.lastrowid or 0),
+        field,
+        "previewed" if ok else "failed",
+        preview_id if ok else None,
+        message,
+        call.run_id,
+    )
+
+
 def get_preview(conn: sqlite3.Connection, row_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM previews WHERE id = ?", (row_id,)).fetchone()
 
@@ -966,6 +1056,104 @@ def confirm_preview(
     )
 
 
+@dataclass
+class ProfileConfirm:
+    row_id: int
+    status: str  # confirmed | dry_run_blocked | failed
+    sent: bool
+    message: str = ""
+    run_id: str = ""
+    extra_calls: int = 0
+
+
+def confirm_profile_preview(
+    click: UserClick,
+    *,
+    conn: sqlite3.Connection,
+    config: Config,
+    settings: Settings,
+    writer: ClaudeUpworkWriter,
+    row_id: int,
+) -> ProfileConfirm:
+    """Confirm one stored profile preview (`profile_previews` row). Needs a confirm click, the same
+    gates as `confirm_preview` (kill switch, dry-run, preview age, monthly cap) and the same single
+    atomic claim: one preview is confirmed at most once."""
+    require_click(click, "confirm", settings)
+    _guard_open(settings)
+    row = conn.execute("SELECT * FROM profile_previews WHERE id = ?", (row_id,)).fetchone()
+    if row is None:
+        raise WriteRefused("Unknown profile preview.")
+    if row["confirmed_at"] is not None or row["confirm_status"] == "confirmed":
+        raise AlreadyConfirmed("This preview was already confirmed (or its confirm was started).")
+    if row["status"] != "previewed" or not row["preview_id"]:
+        raise WriteRefused("This preview cannot be confirmed.")
+    if is_expired(row, settings):
+        raise PreviewExpired("This preview expired. Approve the change again to make a new one.")
+    if settings.get("general.dry_run"):
+        click.consume("confirm", settings)
+        record = {
+            "dry_run": True,
+            "attempted_at": _iso(datetime.now(UTC)),
+            "click_id": click.click_id,
+            "message": DRY_RUN_TEXT,
+        }
+        conn.execute(
+            "UPDATE profile_previews SET confirm_status = 'dry_run_blocked', "
+            "confirm_result_json = ? WHERE id = ? AND confirmed_at IS NULL",
+            (_jdump(record), row_id),
+        )
+        log.warning("dry-run: profile confirm_preview blocked for row %s", row_id)
+        return ProfileConfirm(row_id, "dry_run_blocked", False, DRY_RUN_TEXT)
+    check_monthly_cap(conn, config, settings)
+    claim = conn.execute(
+        "UPDATE profile_previews SET confirmed_at = ?, confirm_status = 'failed', "
+        "confirm_result_json = ? WHERE id = ? AND confirmed_at IS NULL AND status = 'previewed'",
+        (
+            _iso(datetime.now(UTC)),
+            _jdump({"in_progress": True, "click_id": click.click_id}),
+            row_id,
+        ),
+    )
+    if claim.rowcount != 1:
+        raise AlreadyConfirmed("This preview was already confirmed (or its confirm was started).")
+    args = {
+        "action": CONFIRM_ACTION,
+        "org_uid": json.loads(row["request_json"])["org_uid"],
+        "params": {"type": CONFIRM_TYPES["profile"], "preview_id": row["preview_id"]},
+    }
+    try:
+        call = writer.call(click, CONFIRM_PREVIEW, args)
+    except Exception as exc:
+        conn.execute(
+            "UPDATE profile_previews SET confirm_result_json = ? WHERE id = ?",
+            (_jdump({"error": f"{type(exc).__name__}: {exc}"[:400], "click_id": click.click_id}),
+             row_id),
+        )  # fmt: skip
+        raise
+    res = call.result
+    status = "failed" if res.is_error else "confirmed"
+    record = {
+        "response": res.text if res.is_error else res.data(),
+        "is_error": res.is_error,
+        "click_id": click.click_id,
+        "run_id": call.run_id,
+        "extra_calls": call.extra_calls,
+    }
+    conn.execute(
+        "UPDATE profile_previews SET confirm_status = ?, confirm_result_json = ? WHERE id = ?",
+        (status, _jdump(record), row_id),
+    )
+    log.warning("profile confirm_preview: row %s -> %s (run %s)", row_id, status, call.run_id)
+    return ProfileConfirm(
+        row_id,
+        status,
+        status == "confirmed",
+        "" if status == "confirmed" else (res.text.strip()[:300] or "Confirm failed."),
+        call.run_id,
+        call.extra_calls,
+    )
+
+
 __all__ = [
     "WRITE_TOOLS",
     "ClaudeUpworkWriter",
@@ -974,4 +1162,5 @@ __all__ = [
     "preview_proposal",
     "remake_preview",
     "confirm_preview",
+    "confirm_profile_preview",
 ]

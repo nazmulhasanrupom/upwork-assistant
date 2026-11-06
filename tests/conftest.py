@@ -140,6 +140,18 @@ def no_metrics_in_daily(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_profile_versions_in_daily(request, monkeypatch):
+    """The daily profile copy (plan O1) is off in tests about something else (their fake Upwork
+    client only knows find_jobs). Tests marked `@pytest.mark.profile_versions` run the real
+    part."""
+    if request.node.get_closest_marker("profile_versions"):
+        return
+    from app.tasks import daily
+
+    monkeypatch.setattr(daily, "profile_versions_part", lambda *a, **k: [])
+
+
+@pytest.fixture(autouse=True)
 def no_rank_in_daily(request, monkeypatch):
     """The daily task's keyword rank check (plan X2) is off in tests about something else (their
     fake Upwork client only knows find_jobs). Tests marked `@pytest.mark.rank` run the real

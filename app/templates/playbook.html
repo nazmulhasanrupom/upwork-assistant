@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import flash, pill %}
+{% block title %}Playbook{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Playbook and tests</h1>
+  <p class="muted">What to try on your Upwork profile, one change at a time. A test runs {{ test_days }} days and is judged with 7-day averages. This page only shows the state: it changes nothing on Upwork.</p>
+</div>
+
+<section aria-labelledby="pb-state">
+  <h2 id="pb-state">Test status</h2>
+  {% if active %}
+    {{ flash("ok", "A test is running: " ~ active.tactic ~ " (started " ~ active.started ~ ", judged on " ~ active.ends ~ ").") }}
+  {% endif %}
+  {% if blocked %}
+    {{ flash("error" if not active else "info", "No new test can start. " ~ blocked) }}
+  {% else %}
+    {{ flash("ok", "A new test can start.") }}
+  {% endif %}
+</section>
+
+<section aria-labelledby="pb-tactics">
+  <h2 id="pb-tactics">Tactics <span class="count">{{ tactics | length }}</span></h2>
+  <div class="table-wrap">
+  <table class="table" id="playbook-tactics">
+    <thead><tr><th scope="col" class="num">#</th><th scope="col">Tactic</th><th scope="col">Type</th><th scope="col">Status</th></tr></thead>
+    <tbody>
+    {% for t in tactics %}
+    <tr>
+      <td class="num">{{ t.no }}</td>
+      <th scope="row">{{ t.tactic }}</th>
+      <td>{{ t.type }}</td>
+      <td>{{ pill(t.status, "good" if t.status in ("worked", "always on") else ("warn" if t.status == "testing" else ("bad" if t.status == "hurt" else ""))) }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section aria-labelledby="pb-tests">
+  <h2 id="pb-tests">Tests <span class="count">{{ experiments | length }}</span></h2>
+  {% if experiments %}
+  <div class="table-wrap">
+  <table class="table" id="playbook-experiments">
+    <thead><tr><th scope="col">Tactic</th><th scope="col">Started</th><th scope="col">Judged on</th><th scope="col">Status</th><th scope="col">Baseline (7-day averages)</th><th scope="col">Result</th></tr></thead>
+    <tbody>
+    {% for e in experiments %}
+    <tr>
+      <th scope="row">{% if e.tactic_no is not none %}#{{ e.tactic_no }} {% endif %}{{ e.tactic }}</th>
+      <td>{{ e.started }}</td>
+      <td>{{ e.ends }}</td>
+      <td>{{ pill(e.outcome or "running", "good" if e.outcome == "worked" else ("bad" if e.outcome == "hurt" else ("warn" if not e.outcome else ""))) }}</td>
+      <td class="small">
+        {% for k, v in (e.baseline.metrics or {}).items() %}{{ k }} {{ "%.1f" | format(v) if v is not none else "n/a" }}{% if not loop.last %}, {% endif %}{% endfor %}
+        {% if e.baseline.rank %}<br>{% for k, v in e.baseline.rank.items() %}{{ k }} {{ "%.1f" | format(v) if v is not none else "n/a" }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+      </td>
+      <td>{{ e.result or "" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No test yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

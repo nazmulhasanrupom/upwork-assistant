@@ -284,7 +284,7 @@ def test_job_pages_show_fit_and_draft(web, config, fake_claude_gen):
     assert 'data-copy="#draft-cover"' in r.text and "/static/copy.js" in r.text
     assert 'id="draft-answer-1"' in r.text  # the post has screening questions
     assert "Skipped instruction" in r.text  # the flag is shown
-    assert "Portfolio item A" in r.text and "Nothing is sent to Upwork" in r.text
+    assert "Portfolio item A" in r.text and "Approve is the only step that can send" in r.text
     assert client.get("/static/copy.js").status_code == 200
 
 

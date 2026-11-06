@@ -19,5 +19,6 @@ markers = [
   "judging: run the real judge/write step of the daily task (with a fake claude)",
   "after_send: run the real after-send proposal review of the daily task (with fakes)",
   "metrics: run the real daily metrics snapshot of the daily task (with a fake bridge)",
+  "profile_versions: run the real daily profile copy of the daily task (with a fake bridge)",
   "rank: run the real daily keyword rank check of the daily task (with a fake bridge)",
 ]
