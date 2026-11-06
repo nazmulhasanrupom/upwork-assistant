@@ -1,0 +1,6 @@
+# Laptop only: publish the panel on localhost.
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up
+services:
+  panel:
+    ports:
+      - "8000:8000"
