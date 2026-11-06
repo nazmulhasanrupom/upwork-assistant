@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, flash, stat %}
+{% block title %}Runs and costs{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Runs and costs</h1>
+  <p class="muted">Claude cost comes from the cost Claude reports for each call. Runs are the tasks the scheduler or you started.</p>
+</div>
+
+{% if costs.reached %}{{ flash("error", "Monthly cap reached: $" ~ "%.2f"|format(costs.month) ~ " of $" ~ "%.2f"|format(costs.cap) ~ ". Claude steps are paused.") }}
+{% elif costs.warn %}{{ flash("warn", "Claude cost is " ~ costs.percent ~ "% of the monthly cap.") }}{% endif %}
+
+<section aria-label="Claude cost" class="stats">
+  {{ stat("Today", "$" ~ "%.2f"|format(costs.today), "", "", "cost-today") }}
+  {{ stat("This week", "$" ~ "%.2f"|format(costs.week), "since Monday", "", "cost-week") }}
+  {{ stat("This month", "$" ~ "%.2f"|format(costs.month), "", "warn" if costs.warn or costs.reached else "", "cost-month") }}
+  <div class="stat" id="cost-cap">
+    <div class="stat-label">Monthly cap</div>
+    <div class="stat-value"><strong>${{ "%.2f"|format(costs.cap) }}</strong></div>
+    <div class="meter{% if costs.reached %} over{% elif costs.warn %} warn{% endif %}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ costs.percent }}" aria-label="Share of the monthly cap used"><span style="width: {{ costs.percent }}%"></span></div>
+    <div class="stat-hint">{{ costs.percent }}% used</div>
+  </div>
+</section>
+
+<form method="get" action="/runs" class="filters">
+  <label class="field"><span>Task</span>
+    <select name="task">
+      <option value="">all</option>
+      {% for t in tasks %}<option value="{{ t }}"{% if t == f_task %} selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+  </label>
+  <div class="filter-actions">
+    {{ button("Filter", "primary") }}
+    {{ button("Clear", "secondary", href="/runs") }}
+  </div>
+</form>
+<p class="muted small">{{ total }} run(s). Page {{ page }} of {{ pages }}.</p>
+
+{% if runs %}
+<div class="table-wrap">
+<table class="table" id="runs-table">
+  <thead><tr>
+    <th scope="col">Task</th><th scope="col">Started</th><th scope="col">Ended</th><th scope="col">Status</th>
+    <th scope="col" class="num">Upwork calls</th><th scope="col" class="num">Claude cost</th><th scope="col">Error</th><th scope="col">Log</th>
+  </tr></thead>
+  <tbody>
+  {% for r in runs %}
+  <tr>
+    <th scope="row">{{ r.task }}</th>
+    <td>{{ r.started | dt }}</td>
+    <td>{% if r.ended %}{{ r.ended | dt }}{% if r.duration %} <span class="muted small">({{ r.duration }})</span>{% endif %}{% else %}<span class="muted">-</span>{% endif %}</td>
+    <td><span class="status {{ r.status }}">{{ r.status }}</span></td>
+    <td class="num">{{ r.mcp_calls or 0 }}</td>
+    <td class="cost">${{ "%.4f"|format(r.cost) }}</td>
+    <td class="err">{{ r.error or "" }}</td>
+    <td>{% if r.log %}<a href="/runs/log/{{ r.log }}">View log</a>{% else %}<span class="muted">-</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty">
+  <p><strong>No runs yet.</strong></p>
+  <p class="muted">Runs appear here after a task starts. Use Run now on the dashboard.</p>
+</div>
+{% endif %}
+
+{% if prev_url or next_url %}
+<nav class="pager" aria-label="Pages">
+  {% if prev_url %}{{ button("Newer", "secondary", href=prev_url) }}{% endif %}
+  {% if next_url %}{{ button("Older", "secondary", href=next_url) }}{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

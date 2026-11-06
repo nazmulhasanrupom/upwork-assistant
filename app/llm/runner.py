@@ -267,6 +267,7 @@ def run_claude(
     run_id: str | None = None,
     timeout: int = 900,
     prompt_text: str | None = None,
+    record_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Run one headless Claude call. Returns a dict:
 
@@ -274,8 +275,9 @@ def run_claude(
     `output_tokens`, `cost_usd`, `num_turns`.
 
     `prompt_text` replaces the content of `prompt_file` (use `prompting.build_prompt`, so the
-    hard rules come first). Raises BudgetCapReached (before any call), ClaudeRateLimited,
-    ClaudeFailed.
+    hard rules come first). `record_run_id` is the `runs` row this call belongs to; the
+    `claude_calls` row is saved under it (the run folder keeps its own unique id).
+    Raises BudgetCapReached (before any call), ClaudeRateLimited, ClaudeFailed.
     """
     settings = settings or Settings(conn)
     check_monthly_cap(conn, config, settings)
@@ -325,7 +327,7 @@ def run_claude(
             f"claude did not return valid JSON (exit code {proc.returncode})."
         ) from None
 
-    n_in, n_out, cost = save_call(conn, run_id, model, data, task)
+    n_in, n_out, cost = save_call(conn, record_run_id or run_id, model, data, task)
 
     failed = bool(data.get("is_error")) or proc.returncode != 0
     if failed:

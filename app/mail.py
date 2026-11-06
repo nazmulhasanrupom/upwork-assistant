@@ -56,11 +56,26 @@ def _clean(value: Any) -> str:
     return re.sub(r"[\x00-\x1f\x7f]+", " ", str(value)).strip()
 
 
+def _clean_item(item: dict[str, Any]) -> dict[str, Any]:
+    links = [
+        (_clean(label), _clean(href))
+        for label, href in item.get("links") or []
+        if str(href).startswith(("https://", "http://"))
+    ]
+    return {
+        "title": _clean(item.get("title") or ""),
+        "meta": _clean(item.get("meta") or ""),
+        "lines": [_clean(x) for x in item.get("lines") or [] if _clean(x)],
+        "links": links,
+    }
+
+
 def build_email(
     title: str,
     lines: list[str],
     *,
     facts: list[tuple[str, str]] | None = None,
+    items: list[dict[str, Any]] | None = None,
     link_path: str = "",
     base_url: str = "",
     button_label: str = "Open in panel",
@@ -69,13 +84,21 @@ def build_email(
 
     `link_path` is a path in the panel (for example /jobs/123). The button appears only when
     `base_url` (PUBLIC_BASE_URL) is set.
+
+    `items` is a list of blocks (the digest uses one per job), each a dict with `title`, `meta`
+    (small line), `lines` (list of text) and `links` (list of (label, url); http(s) only).
     """
     title = _clean(title)
     lines = [_clean(x) for x in lines if _clean(x)]
     facts = [(_clean(k), _clean(v)) for k, v in (facts or [])]
     url = f"{base_url.rstrip('/')}{link_path}" if base_url else ""
+    blocks = [_clean_item(i) for i in (items or [])]
 
     text_parts = [title, "", *lines]
+    for b in blocks:
+        text_parts += ["", f"* {b['title']}" + (f" ({b['meta']})" if b["meta"] else "")]
+        text_parts += [f"  {x}" for x in b["lines"]]
+        text_parts += [f"  {label}: {href}" for label, href in b["links"]]
     if facts:
         text_parts += ["", *(f"{k}: {v}" for k, v in facts)]
     if url:
@@ -90,6 +113,25 @@ def build_email(
         f'<p style="margin:0 0 12px;font-size:15px;line-height:1.5;color:#374151">{e(x)}</p>'
         for x in lines
     ]
+    for b in blocks:
+        part = [
+            f'<p style="margin:16px 0 2px;font-size:15px;color:#111827"><b>{e(b["title"])}</b></p>'
+        ]
+        if b["meta"]:
+            part.append(
+                f'<p style="margin:0 0 4px;font-size:13px;color:#6b7280">{e(b["meta"])}</p>'
+            )
+        part += [
+            f'<p style="margin:0 0 4px;font-size:14px;line-height:1.5;color:#374151">{e(x)}</p>'
+            for x in b["lines"]
+        ]
+        if b["links"]:
+            anchors = " &middot; ".join(
+                f'<a href="{e(href, quote=True)}" style="color:#2563eb">{e(label)}</a>'
+                for label, href in b["links"]
+            )
+            part.append(f'<p style="margin:0 0 8px;font-size:14px">{anchors}</p>')
+        body.append("".join(part))
     if facts:
         rows = "".join(
             '<tr><td style="padding:6px 12px 6px 0;color:#6b7280;font-size:14px;'

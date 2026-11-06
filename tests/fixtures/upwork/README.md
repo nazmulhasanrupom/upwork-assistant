@@ -7,3 +7,4 @@ Facts seen:
 - get_job has can_apply, plan, bid_stats_available, preferred_qualifications, screening_questions.
 - find_jobs args: action + org_uid + params {mode, days_posted, verified_payment_only, limit}; get uses params {job_id}.
 - smart_search_best_match.json: hourly budget is the `budget` string "$15.00–$35.00/hr" (en dash). `hourly_budget_type` values seen: "client-specified range", "platform default range" (Upwork's default, NOT the client's real rate), "no rate stated". Also a `premium` flag.
+- get_profile.json (action get): title/description/skills under data.personalData + data.skills; rate data.personalData.chargeRate.rawValue; profileAggregates (top_rated, totalEarnings, totalFeedback, totalJobs). No JSS field here. Text fields wrapped in untrusted tags even for own profile.

@@ -166,8 +166,9 @@ class _Stop(Exception):
 class _Runner:
     """Runs batches and applies the stop rules (cap, rate limit, repeated failures)."""
 
-    def __init__(self, conn, settings, config, result: JudgeResult):
+    def __init__(self, conn, settings, config, result: JudgeResult, run_id: str | None = None):
         self.conn, self.settings, self.config, self.result = conn, settings, config, result
+        self.run_id = run_id  # the runs row, so /runs can show the cost of this run
         self.failures = 0
 
     def call(self, task: str, prompt_file: str, input_obj: dict[str, Any], kind: str) -> Any:
@@ -186,6 +187,7 @@ class _Runner:
                 settings=s,
                 effort=s.get(f"models.{kind}_effort") or None,
                 prompt_text=prompting.build_prompt(prompt_file, config=self.config),
+                record_run_id=self.run_id,
             )
         except BudgetCapReached as e:
             self._stop(f"monthly Claude cap reached: {e}")
@@ -447,7 +449,7 @@ def judge_and_draft(
     fit_min = int(settings.get("pay.fit_min"))
     has_user = bool(prompting.user_facts(config))
 
-    runner = _Runner(conn, settings, config, result)
+    runner = _Runner(conn, settings, config, result, run_id)
     todo = _pending_judge(conn, fresh, cutoff)
     write_rows: list[sqlite3.Row] = []
     try:

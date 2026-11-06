@@ -364,3 +364,32 @@ details.advanced .step-title { margin-top: var(--s2); }
 .draft-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s3); }
 .draft-head .sub { margin: 0; }
 .draft-head + pre.text, .draft-head + p + pre.text { margin-top: var(--s1); }
+
+/* ---------- Profile context and Runs (plan J2a, G4) ---------- */
+textarea {
+  width: 100%; font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: 10px 12px; line-height: 1.55; resize: vertical; min-height: 12rem;
+}
+textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+textarea.mono { font-family: var(--mono); font-size: 0.875rem; }
+.count { font-size: 0.875rem; color: var(--muted); font-variant-numeric: tabular-nums; margin: 0; }
+.count.over { color: var(--bad-fg); font-weight: 650; }
+.meter { height: 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; margin: var(--s1) 0; }
+.meter > span { display: block; height: 100%; background: var(--accent); }
+.meter.warn > span { background: var(--warn-line); }
+.meter.over > span { background: var(--bad-line); }
+.compare { display: grid; grid-template-columns: 1fr; gap: var(--s2); }
+.compare h3 { margin: 0 0 var(--s1); font-size: 1rem; }
+.compare textarea { min-height: 22rem; }
+@media (min-width: 900px) { .compare { grid-template-columns: 1fr 1fr; } }
+.page-link { margin-left: auto; }
+pre.logview {
+  white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: var(--s2);
+  font-family: var(--mono); font-size: 0.8125rem; line-height: 1.5;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.table td.cost { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.table td.err { max-width: 24rem; overflow-wrap: anywhere; color: var(--bad-fg); font-size: 0.875rem; }
+#runs-table td, #runs-table th { vertical-align: top; }
+#runs-table td:nth-child(2), #runs-table td:nth-child(3), #runs-table td:last-child { white-space: nowrap; }

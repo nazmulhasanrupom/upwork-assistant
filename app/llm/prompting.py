@@ -47,19 +47,28 @@ def user_facts(config: Config | None = None) -> str:
         return ""
 
 
-def style_text(config: Config | None = None) -> str:
-    """The user's own style file (<DATA_DIR>/context/style.md) or the generic default."""
-    custom = _data_dir(config) / "context" / "style.md"
-    try:
-        text = custom.read_text(encoding="utf-8").strip()
-        if text:
-            return text
-    except OSError:
-        pass
+def style_md_path(config: Config | None = None) -> Path:
+    return _data_dir(config) / "memory" / "style.md"
+
+
+def default_style() -> str:
     try:
         return DEFAULT_STYLE_PATH.read_text(encoding="utf-8").strip()
     except OSError:
         return ""
+
+
+def style_text(config: Config | None = None) -> str:
+    """The user's style file (<DATA_DIR>/memory/style.md, or the older context/style.md), else
+    the generic default."""
+    for custom in (style_md_path(config), _data_dir(config) / "context" / "style.md"):
+        try:
+            text = custom.read_text(encoding="utf-8").strip()
+            if text:
+                return text
+        except OSError:
+            pass
+    return default_style()
 
 
 def build_prompt(

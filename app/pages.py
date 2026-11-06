@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
+from app import costs as cost_totals
 from app.auth_routes import render
 from app.llm import prompting
 from app.tasks import lock, trigger
@@ -141,7 +142,15 @@ def _parse_day(value: str) -> date | None:
 # ---------------------------------------------------------------- dashboard
 
 
-def dashboard_data(conn: sqlite3.Connection, tz: tzinfo, now: datetime | None = None) -> dict:
+def dashboard_data(
+    conn: sqlite3.Connection,
+    tz: tzinfo,
+    now: datetime | None = None,
+    *,
+    config: Any = None,
+    settings: Any = None,
+) -> dict:
+    """`config` and `settings` add the Claude cost card and the cap warning (plan G4)."""
     now = now or datetime.now(UTC)
     today = now.astimezone(tz).date()
     since = _local_day_start_utc(today, tz)
@@ -182,6 +191,12 @@ def dashboard_data(conn: sqlite3.Connection, tz: tzinfo, now: datetime | None = 
                     "link": "",
                 }
             )
+    costs = None
+    if config is not None and settings is not None:
+        costs = cost_totals.cost_summary(conn, config, settings, tz, now)
+        cap_alert = cost_totals.cap_alert(costs)
+        if cap_alert:
+            alerts.append(cap_alert)
     for a in stored_alerts:
         link = "/settings/email" if a["key"] in EMAIL_ALERTS else ""
         alerts.append({"kind": "warn", "message": a["message"], "link": link})
@@ -200,6 +215,7 @@ def dashboard_data(conn: sqlite3.Connection, tz: tzinfo, now: datetime | None = 
         "alerts": alerts,
         "counts": counts,
         "today": today.isoformat(),
+        "costs": costs,
     }
 
 
@@ -217,7 +233,7 @@ RUN_MESSAGES = {
 def runs_panel(request: Request) -> dict:
     """Data for the Last runs table: one row per task, with the Run now state."""
     config = request.app.state.config
-    data = dashboard_data(request.app.state.db, _tz(request))
+    data = dashboard_data(request.app.state.db, _tz(request))  # no costs: the table needs none
     busy = trigger.running(config)
     rows = []
     for task, run in data["last_runs"].items():
@@ -239,7 +255,8 @@ def runs_panel(request: Request) -> dict:
 
 @router.get("/")
 def dashboard(request: Request, msg: str = "") -> Response:
-    data = dashboard_data(request.app.state.db, _tz(request))
+    s = request.app.state
+    data = dashboard_data(s.db, _tz(request), config=s.config, settings=s.settings)
     return render(
         request, "dashboard.html", **data, **runs_panel(request), notice=RUN_MESSAGES.get(msg)
     )

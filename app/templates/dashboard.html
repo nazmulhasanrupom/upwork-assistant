@@ -30,11 +30,15 @@
   {% endif %}
   {{ stat("New HIGH", counts.HIGH, "since midnight", "", "stat-high") }}
   {{ stat("New MID", counts.MID, "since midnight", "", "stat-mid") }}
+  {% if costs %}
+  {% set cost_hint %}Week ${{ "%.2f"|format(costs.week) }}, month ${{ "%.2f"|format(costs.month) }} of ${{ "%.0f"|format(costs.cap) }} cap ({{ costs.percent }}%){% endset %}
+  {{ stat("Claude cost today", "$" ~ "%.2f"|format(costs.today), cost_hint, "warn" if costs.warn or costs.reached else "", "cost") }}
+  {% endif %}
   {% if waiting is defined and waiting is not none %}
   {{ stat("Waiting approval", waiting, "", "", "stat-waiting") }}
   {% endif %}
 </section>
-<p>{{ button("See jobs", "secondary", href="/jobs") }}</p>
+<p>{{ button("See jobs", "secondary", href="/jobs") }} {{ button("Runs and costs", "secondary", href="/runs") }}</p>
 
 <h2>Last runs</h2>
 {% include "_runs_table.html" %}

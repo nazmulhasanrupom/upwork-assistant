@@ -41,6 +41,17 @@ top_skills = 10                 # skills listed in the daily note
 
 [ui]
 jobs_page_size = 50             # cards per page on /jobs
+runs_page_size = 25             # rows per page on /runs
+log_match_minutes = 10          # a run's log file starts at most this long before the run row
+log_view_max_kb = 256           # the log viewer shows at most the last part of a file this big
+
+[memory]                  # SPEC2 5.1, plan J2a
+total_cap_chars = 3500          # MEMORY.md + USER.md together; over this the page warns
+user_build_max_chars = 2500     # USER.md length asked for when built from the Upwork profile
+input_max_chars = 20000         # biggest text the Profile page accepts per box
+build_profile_max_chars = 12000 # profile text sent to Claude is cut to this
+build_max_turns = 4
+build_max_budget_usd = 0.30
 
 [schedules]               # SPEC 9, cron in the configured time zone
 daily = "0 */2 * * *"
@@ -69,6 +80,7 @@ think_max_budget_usd = 1.00
 write_max_turns = 6
 write_max_budget_usd = 0.50
 monthly_cap_usd = 50.0
+cap_warn_percent = 80           # dashboard and /runs warn when the month's cost reaches this share of the cap
 max_jobs_per_think_call = 5
 max_proposals_per_write_call = 3
 retry_hours = 48                # jobs still waiting for a judgement or a draft are retried for this long
@@ -131,6 +143,8 @@ gmail_state_minutes = 10        # a connect link is valid this long, one use
 gmail_refresh_skew_seconds = 60 # refresh this long before the access token ends
 gmail_timeout_seconds = 20
 smtp_timeout_seconds = 20
+digest_skip_empty = true        # no daily digest email when no MID/HIGH job was kept today
+digest_max_jobs = 15            # jobs listed in the digest email, best fit first
 
 [email.events]            # one switch per email (SPEC 11); all on by default
 high_job = true

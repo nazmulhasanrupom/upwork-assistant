@@ -120,6 +120,22 @@ def test_build_email_escapes_and_has_button():
     assert "Open in panel: https://p.example/jobs/1" in text and "Rate: $40/hr" in text
 
 
+def test_build_email_items_are_escaped_and_links_are_http_only():
+    items = [
+        {
+            "title": "Job <i>one</i>",
+            "meta": "HIGH, fit 80",
+            "lines": ["Why apply: <b>x</b>"],
+            "links": [("Open", "https://p.example/jobs/1"), ("Bad", "javascript:alert(1)")],
+        }
+    ]
+    text, html = mail.build_email("T", ["intro"], items=items)
+    assert "* Job <i>one</i> (HIGH, fit 80)" in text and "Open: https://p.example/jobs/1" in text
+    assert "javascript" not in text and "javascript" not in html
+    assert "<i>one</i>" not in html and "Job &lt;i&gt;one&lt;/i&gt;" in html
+    assert 'href="https://p.example/jobs/1"' in html
+
+
 def test_build_email_no_button_without_base_url():
     text, html = mail.build_email("T", ["x"], link_path="/jobs/1")
     assert "Open in panel" not in html and "http" not in text
