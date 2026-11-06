@@ -95,6 +95,11 @@ E3. `app/tasks/daily.py` steps 1 to 7 of SPEC 6.2, plus Connects check and daily
 E4. Jobs page `/jobs` (cards, filters) and job detail page `/jobs/<id>`. Dashboard `/` with counts, Connects, last runs.
 - Done when: tests pass on fixtures; daily task on fixtures fills the DB; pages render in a test client.
 
+## Phase U: UI polish (added 2026-11-06, user request)
+
+U1. Minimal, clean, easy-to-read UI for all existing pages (login, setup, dashboard, jobs, job detail, upwork). One hand-written `app/static/app.css` (no framework, no CDN, no build step). System font stack, good spacing, max-width content, clear type sizes. Light and dark mode via `prefers-color-scheme`. Top nav with the current page marked. Tier badges (HIGH / MID / LOW colors), flag chips, stat cards on the dashboard, job cards in a responsive grid, clear primary/secondary buttons, readable forms, visible focus states, works on a phone. Shared Jinja macros in `app/templates/_macros.html` (badge, card, stat, button, flash) so later phases reuse them.
+- Done when: all tests pass; screenshots of each page (light + dark, desktop + phone width) taken with headless Chromium or Playwright from a local run with fixture data, saved in `/tmp` scratch and listed in the report.
+
 ## Phase F: Day-1 probes (human present)
 
 F0. Deploy to Coolify (human + manager). Coolify needs the code from a git repo. Plan: a PRIVATE GitHub repo now (public only at D6). Human sets in Coolify: Dockerfile build pack, `/data` volume, domain, env vars (`PUBLIC_BASE_URL`, `SECRET_KEY`, Claude token), a Scheduled Task `python -m app.tasks.scheduler` every 5 min. Then human reads `SETUP CODE` in the log, makes the admin, clicks Connect Upwork.

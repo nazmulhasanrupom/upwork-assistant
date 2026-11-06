@@ -1,23 +1,28 @@
 FROM python:3.12-slim
 
-ARG TARGETARCH=amd64
+# Set by BuildKit. Empty when built without it (classic builder), then dpkg decides.
+ARG TARGETARCH
 ARG SUPERCRONIC_VERSION=v0.2.51
 ARG SUPERCRONIC_SHA1_AMD64=1692066e350a88ff4d7d6474fe3c7a6c41ec5e89
 ARG SUPERCRONIC_SHA1_ARM64=9d4c2000493215a1898502b2fc2dada3e8ea8c7a
+ARG SUPERCRONIC_SHA1_ARM=9224966499cd319ed85759e9b6442f885d920c4f
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates tzdata \
  && rm -rf /var/lib/apt/lists/*
 
-# supercronic: static cron runner, checksum verified
+# supercronic: static cron runner, picked by CPU architecture, checksum verified
 RUN set -eu; \
-    case "${TARGETARCH}" in \
-      amd64) SHA="${SUPERCRONIC_SHA1_AMD64}" ;; \
-      arm64) SHA="${SUPERCRONIC_SHA1_ARM64}" ;; \
-      *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; \
+    arch="${TARGETARCH:-}"; \
+    if [ -z "${arch}" ]; then arch="$(dpkg --print-architecture)"; fi; \
+    case "${arch}" in \
+      amd64|x86_64) arch=amd64; SHA="${SUPERCRONIC_SHA1_AMD64}" ;; \
+      arm64|aarch64) arch=arm64; SHA="${SUPERCRONIC_SHA1_ARM64}" ;; \
+      arm|armhf|armv7) arch=arm; SHA="${SUPERCRONIC_SHA1_ARM}" ;; \
+      *) echo "unsupported architecture ${arch}" >&2; exit 1 ;; \
     esac; \
     curl -fsSLo /usr/local/bin/supercronic \
-      "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${TARGETARCH}"; \
+      "https://github.com/aptible/supercronic/releases/download/${SUPERCRONIC_VERSION}/supercronic-linux-${arch}"; \
     echo "${SHA}  /usr/local/bin/supercronic" | sha1sum -c -; \
     chmod +x /usr/local/bin/supercronic
 
