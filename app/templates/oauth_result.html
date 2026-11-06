@@ -1,17 +1,21 @@
 {% extends "base.html" %}
+{% from "_macros.html" import button, flash, card %}
 {% block title %}Upwork login{% endblock %}
+{% block main_class %}narrow{% endblock %}
 {% block content %}
+{% call card(cls="panel auth-card") %}
 {% if error %}
 <h1>Upwork was not connected</h1>
-<p class="error" role="alert">{{ error }}</p>
+{{ flash("error", error) }}
 {% else %}
 <h1>Upwork is connected</h1>
 <p>The login was saved.</p>
-{% if account_notice %}<p role="status">{{ account_notice }}</p>{% endif %}
+{% if account_notice %}{{ flash("info", account_notice) }}{% endif %}
 {% if account_error %}
-<p class="error" role="alert">{{ account_error }}</p>
-<p>Open the Upwork page and press "Detect account" to try again (you must be logged in there).</p>
+{{ flash("error", account_error) }}
+<p class="muted">Open the Upwork page and press "Detect account" to try again (you must be logged in there).</p>
 {% endif %}
 {% endif %}
-<p><a href="/upwork">Go to the Upwork page</a></p>
+<p>{{ button("Go to the Upwork page", "primary", href="/upwork") }}</p>
+{% endcall %}
 {% endblock %}

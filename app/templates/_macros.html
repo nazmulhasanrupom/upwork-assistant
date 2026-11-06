@@ -1,0 +1,72 @@
+{# Shared UI pieces. Import with: {% from "_macros.html" import badge, pill, chip, flash, stat, button, card, job_card %} #}
+
+{% macro badge(tier, est=false) -%}
+<span class="badge {{ tier }}">{{ tier }}{% if est %} (est.){% endif %}</span>
+{%- endmacro %}
+
+{% macro pill(text, kind="") -%}
+<span class="pill{% if kind %} {{ kind }}{% endif %}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro chips(items) -%}
+{% if items %}<ul class="chips" aria-label="Flags">{% for f in items %}<li class="chip">{{ f }}</li>{% endfor %}</ul>{% endif %}
+{%- endmacro %}
+
+{# kind: error | warn | ok | info. The label word keeps the meaning when colors are not seen. #}
+{% macro flash(kind, text) -%}
+{%- set labels = {"error": "Error", "warn": "Warning", "ok": "Done", "info": "Note"} -%}
+<div class="flash {{ kind }}" role="{{ 'alert' if kind in ('error', 'warn') else 'status' }}">
+  <strong class="flash-label">{{ labels.get(kind, "Note") }}</strong>
+  <span class="flash-text">{{ text }}{{ caller() if caller else "" }}</span>
+</div>
+{%- endmacro %}
+
+{# kind: "" | warn | bad | good. value is the big number. #}
+{% macro stat(label, value, hint="", kind="", id="") -%}
+<div class="stat{% if kind %} {{ kind }}{% endif %}"{% if id %} id="{{ id }}"{% endif %}>
+  <div class="stat-label">{{ label }}</div>
+  <div class="stat-value"><strong>{{ value }}</strong>{% if kind == "warn" %} {{ pill("Low", "warn") }}{% endif %}</div>
+  {% if hint %}<div class="stat-hint">{{ hint }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{# kind: primary | secondary | danger. With href it is a link, otherwise a submit button. #}
+{% macro button(label, kind="primary", href="", type="submit", small=false, external=false) -%}
+{%- set cls = "btn btn-" ~ kind ~ (" btn-sm" if small else "") -%}
+{%- if href -%}
+<a class="{{ cls }}" href="{{ href }}"{% if external %} rel="noopener noreferrer" target="_blank"{% endif %}>{{ label }}</a>
+{%- else -%}
+<button class="{{ cls }}" type="{{ type }}">{{ label }}</button>
+{%- endif -%}
+{%- endmacro %}
+
+{# A panel. Use {% call card("Title") %}...{% endcall %}. #}
+{% macro card(title="", cls="panel") -%}
+<section class="card {{ cls }}">
+  {% if title %}<h2 class="card-title">{{ title }}</h2>{% endif %}
+  {{ caller() }}
+</section>
+{%- endmacro %}
+
+{# One job in the jobs grid. #}
+{% macro job_card(j) -%}
+<li>
+  <article class="card" id="job-{{ j.job_id }}">
+    <div class="card-head">
+      {% if j.tier %}{{ badge(j.tier, j.tier_estimated) }}{% endif %}
+      {{ pill(j.status, "status-pill") }}
+    </div>
+    <h3 class="card-job-title"><a href="/jobs/{{ j.job_id }}">{{ j.title or j.job_id }}</a></h3>
+    <dl class="facts-grid">
+      <div><dt>Rate paid</dt><dd>{{ (j.rate_paid | rate) or "n/a" }}</dd></div>
+      <div><dt>Client spend</dt><dd>{{ (j.client_spend | money) or "n/a" }}</dd></div>
+      <div><dt>Hires</dt><dd>{{ j.client_hires if j.client_hires is not none else "n/a" }}</dd></div>
+      <div><dt>Rating</dt><dd>{{ j.client_rating if j.client_rating is not none else "n/a" }}</dd></div>
+    </dl>
+    {% if j.fit_score is not none %}<p class="fit"><strong>Fit {{ j.fit_score }}</strong>{% if j.why_apply %} <span class="muted">{{ j.why_apply }}</span>{% endif %}</p>{% endif %}
+    {% if j.drop_reason %}<p class="muted small">Dropped: {{ j.drop_reason }}</p>{% endif %}
+    {{ chips(j.flags) }}
+    <p class="card-foot muted small">First seen <time>{{ j.first_seen | dt }}</time></p>
+  </article>
+</li>
+{%- endmacro %}

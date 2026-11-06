@@ -1,5 +1,6 @@
 """Dashboard, jobs list and job detail render after login (plan E4)."""
 
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -24,6 +25,11 @@ def web(config):
 def run(app, config, balance=50, client=None):
     s = app.state.settings
     return daily.run_daily(app.state.db, s, config, client or make_client(s, balance=balance))
+
+
+def stat(html, stat_id):
+    """The big number of one dashboard stat card."""
+    return re.search(rf'id="{stat_id}".*?<strong>([^<]*)</strong>', html, re.S).group(1)
 
 
 def cards(html):
@@ -53,9 +59,9 @@ def test_dashboard_with_low_connects(web, config):
     run(app, config, balance=5)
     r = client.get("/")
     assert r.status_code == 200
-    assert 'class="warn"' in r.text and "Balance: <strong>5</strong>" in r.text
+    assert 'class="stat warn" id="connects"' in r.text and "<strong>5</strong>" in r.text
     assert "below the 12 needed" in r.text  # alert row
-    assert "MID: <strong>3</strong>" in r.text and "HIGH: <strong>2</strong>" in r.text
+    assert stat(r.text, "stat-mid") == "3" and stat(r.text, "stat-high") == "2"
     assert 'class="status ok"' in r.text
 
 
@@ -63,7 +69,7 @@ def test_dashboard_connects_ok_no_warning(web, config):
     app, client = web
     run(app, config, balance=50)
     r = client.get("/")
-    assert "Balance: <strong>50</strong>" in r.text and 'class="warn"' not in r.text
+    assert stat(r.text, "connects") == "50" and "stat warn" not in r.text
     assert "below the" not in r.text
 
 

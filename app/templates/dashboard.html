@@ -1,47 +1,56 @@
 {% extends "base.html" %}
+{% from "_macros.html" import flash, stat, button, card %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
-<p>Signed in as {{ user }}.</p>
+<div class="page-head">
+  <h1>Dashboard</h1>
+  <p class="muted">Signed in as {{ user }}. New today: {{ today }}.</p>
+</div>
 
 {% if alerts %}
-<section aria-label="Alerts">
+<section aria-label="Alerts" class="alerts">
   {% for a in alerts %}
-  <div class="alert {{ a.kind }}" role="alert">{{ a.message }}{% if a.link %} <a href="{{ a.link }}">Open</a>{% endif %}</div>
+  {% call flash(a.kind, a.message) %}{% if a.link %} <a href="{{ a.link }}">Open</a>{% endif %}{% endcall %}
   {% endfor %}
 </section>
 {% endif %}
 
-<h2>Connects</h2>
-{% if connects %}
-<p class="{{ 'warn' if low_connects else '' }}" id="connects">
-  Balance: <strong>{{ connects.balance }}</strong>
-  {% if connects.needed is not none %}(top job needs {{ connects.needed }}){% endif %}
-  {% if low_connects %} - LOW{% endif %}
-  <small>seen {{ connects.seen_at | dt }}</small>
-</p>
-{% else %}
-<p>No Connects balance seen yet. It is read when the daily task fetches a job.</p>
-{% endif %}
-
-<h2>New today ({{ today }})</h2>
-<p>MID: <strong>{{ counts.MID }}</strong> &nbsp; HIGH: <strong>{{ counts.HIGH }}</strong>
-  &nbsp; <a href="/jobs">See jobs</a></p>
+<section aria-label="Numbers" class="stats">
+  {% if connects %}
+  {% set hint %}{% if connects.needed is not none %}Top job needs {{ connects.needed }}. {% endif %}Seen {{ connects.seen_at | dt }}{% endset %}
+  {{ stat("Connects", connects.balance, hint, "warn" if low_connects else "", "connects") }}
+  {% else %}
+  {{ stat("Connects", "-", "No Connects balance seen yet. It is read when the daily task fetches a job.", "", "connects") }}
+  {% endif %}
+  {{ stat("New HIGH", counts.HIGH, "since midnight", "", "stat-high") }}
+  {{ stat("New MID", counts.MID, "since midnight", "", "stat-mid") }}
+  {% if waiting is defined and waiting is not none %}
+  {{ stat("Waiting approval", waiting, "", "", "stat-waiting") }}
+  {% endif %}
+</section>
+<p>{{ button("See jobs", "secondary", href="/jobs") }}</p>
 
 <h2>Last runs</h2>
-<table class="kv">
+<div class="table-wrap">
+<table class="table">
+  <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col" class="num">Upwork calls</th></tr></thead>
+  <tbody>
   {% for task, run in last_runs.items() %}
-  <tr>
-    <th>{{ task }}</th>
+  <tr{% if run and run.error %} class="has-error"{% endif %}>
+    <th scope="row">{{ task }}</th>
+    {% if run %}
     <td>
-      {% if run %}
       <span class="status {{ run.status }}">{{ run.status }}</span>
-      {{ run.started | dt }}
-      {% if run.mcp_calls %}<small>({{ run.mcp_calls }} Upwork calls)</small>{% endif %}
-      {% if run.error %}<br><small class="error">{{ run.error }}</small>{% endif %}
-      {% else %}never run{% endif %}
     </td>
+    <td>{{ run.started | dt }}</td>
+    <td class="num">{{ run.mcp_calls or 0 }}</td>
+    {% else %}
+    <td colspan="3" class="muted">never run</td>
+    {% endif %}
   </tr>
+  {% if run and run.error %}<tr class="run-error"><td colspan="4" class="small">{{ run.error }}</td></tr>{% endif %}
   {% endfor %}
+  </tbody>
 </table>
+</div>
 {% endblock %}

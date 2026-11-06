@@ -1,71 +1,81 @@
 {% extends "base.html" %}
+{% from "_macros.html" import button, flash, card, pill %}
 {% block title %}Upwork connection{% endblock %}
+{% block main_class %}medium{% endblock %}
 {% block content %}
-<h1>Upwork connection</h1>
-{% if notice %}<p role="status">{{ notice }}</p>{% endif %}
-{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<div class="page-head">
+  <h1>Upwork connection</h1>
+</div>
+{% if notice %}{{ flash("ok", notice) }}{% endif %}
+{% if error %}{{ flash("error", error) }}{% endif %}
+
+{% call card("Login") %}
+{% if st.state == "connected" %}
+  <p>{{ pill("Connected", "ok") }}</p>
+  <dl class="kv">
+    <div><dt>Access token ends</dt><dd><code>{{ st.expires_at }}</code> (UTC)
+      {% if st.expired %}<span class="error-text">expired, it is renewed on the next call</span>
+      {% elif minutes_left is not none %}<span class="muted">(in about {{ minutes_left }} min)</span>{% endif %}</dd></div>
+    <div><dt>Refresh token</dt><dd>{{ "saved" if st.has_refresh_token else "none, you must connect again when the access token ends" }}</dd></div>
+    {% if st.scope %}<div><dt>Scope</dt><dd><code class="wrap">{{ st.scope }}</code></dd></div>{% endif %}
+  </dl>
+  <form method="post" action="/upwork/disconnect" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Disconnect", "danger") }}
+  </form>
+{% elif st.state == "unreadable" %}
+  {{ flash("error", st.message) }}
+  <form method="post" action="/upwork/disconnect" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Disconnect", "danger") }}
+  </form>
+{% else %}
+  <p>{{ pill("Not connected", "warn") }}</p>
+{% endif %}
+{% if st.state != "connected" %}
+  {% if base_ok %}
+  <form method="post" action="/oauth/start" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Connect Upwork", "primary") }}
+  </form>
+  {% else %}
+  {{ flash("error", "PUBLIC_BASE_URL is not set. Upwork needs your public HTTPS address to log in.") }}
+  {% endif %}
+{% endif %}
+{% endcall %}
 
 {% if st.state == "connected" %}
-  <p><strong>Connected.</strong></p>
-  <ul>
-    <li>Access token ends: <code>{{ st.expires_at }}</code> (UTC)
-      {% if st.expired %}<span class="error">expired, it is renewed on the next call</span>
-      {% elif minutes_left is not none %}(in about {{ minutes_left }} min){% endif %}</li>
-    <li>Refresh token: {{ "saved" if st.has_refresh_token else "none, you must connect again when the access token ends" }}</li>
-    {% if st.scope %}<li>Scope: <code>{{ st.scope }}</code></li>{% endif %}
-  </ul>
-  <form method="post" action="/upwork/disconnect">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit">Disconnect</button>
-  </form>
-  <h2>Freelancer account</h2>
+{% call card("Freelancer account") %}
   {% if account %}
   <p>In use: <strong>{{ account.name or "(no name)" }}</strong> (<code>{{ account.org_uid }}</code>)</p>
   {% else %}
-  <p class="error">No freelancer account is selected yet. Jobs cannot be searched until one is.</p>
+  {{ flash("error", "No freelancer account is selected yet. Jobs cannot be searched until one is.") }}
   {% endif %}
   {% if candidates %}
-  <form method="post" action="/upwork/account">
+  <form method="post" action="/upwork/account" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <p>More than one freelancer account was found. Pick one:</p>
     {% for c in candidates %}
-    <p><label><input type="radio" name="org_uid" value="{{ c.org_uid }}"
+    <label class="choice"><input type="radio" name="org_uid" value="{{ c.org_uid }}"
       {% if account and account.org_uid == c.org_uid %}checked{% endif %} required>
-      {{ c.name }} (<code>{{ c.org_uid }}</code>)</label></p>
+      <span>{{ c.name }} (<code>{{ c.org_uid }}</code>)</span></label>
     {% endfor %}
-    <button type="submit">Use this account</button>
+    <div class="actions">{{ button("Use this account", "primary") }}</div>
   </form>
   {% endif %}
-  <form method="post" action="/upwork/detect">
+  <form method="post" action="/upwork/detect" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit">Detect account</button>
+    {{ button("Detect account", "secondary") }}
   </form>
-{% elif st.state == "unreadable" %}
-  <p class="error" role="alert">{{ st.message }}</p>
-  <form method="post" action="/upwork/disconnect">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit">Disconnect</button>
-  </form>
-{% else %}
-  <p>Not connected.</p>
-{% endif %}
-
-{% if st.state != "connected" %}
-  {% if base_ok %}
-  <form method="post" action="/oauth/start">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit">Connect Upwork</button>
-  </form>
-  {% else %}
-  <p class="error">PUBLIC_BASE_URL is not set. Upwork needs your public HTTPS address to log in.</p>
-  {% endif %}
+{% endcall %}
 {% endif %}
 
 {% if base_ok %}
-<h2>This copy's app identity</h2>
-<ul>
-  <li>Client ID: <code class="wrap">{{ client_id }}</code></li>
-  <li>Redirect URL: <code class="wrap">{{ redirect_uri }}</code></li>
-</ul>
+{% call card("This copy's app identity") %}
+<dl class="kv">
+  <div><dt>Client ID</dt><dd><code class="wrap">{{ client_id }}</code></dd></div>
+  <div><dt>Redirect URL</dt><dd><code class="wrap">{{ redirect_uri }}</code></dd></div>
+</dl>
+{% endcall %}
 {% endif %}
 {% endblock %}

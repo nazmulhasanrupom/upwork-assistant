@@ -1,28 +1,36 @@
+{% from "_macros.html" import button %}
+{% set path = request.url.path if request else "" %}
+{% macro nav_link(href, label, active) -%}
+<a href="{{ href }}"{% if active %} aria-current="page"{% endif %}>{{ label }}</a>
+{%- endmacro %}
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Upwork Assistant{% endblock %}</title>
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Upwork Assistant{% endblock %} - Upwork Assistant</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/htmx.min.js" defer></script>
 </head>
 <body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
-  <header>
-    <strong>Upwork Assistant</strong>
-    {% if user %}
-    <nav>
-      <a href="/">Dashboard</a>
-      <a href="/jobs">Jobs</a>
-      <a href="/upwork">Upwork</a>
-    </nav>
-    <form method="post" action="/logout" class="inline">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit">Log out</button>
-    </form>
-    {% endif %}
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/">Upwork Assistant</a>
+      {% if user %}
+      <nav aria-label="Main">
+        {{ nav_link("/", "Dashboard", path == "/") }}
+        {{ nav_link("/jobs", "Jobs", path.startswith("/jobs")) }}
+        {{ nav_link("/upwork", "Upwork", path.startswith("/upwork")) }}
+      </nav>
+      <form method="post" action="/logout" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        {{ button("Log out", "secondary", small=true) }}
+      </form>
+      {% endif %}
+    </div>
   </header>
-  <main>
+  <main class="{% block main_class %}wide{% endblock %}">
     {% block content %}{% endblock %}
   </main>
   <footer><small>Not made by or linked to Upwork or Anthropic.</small></footer>

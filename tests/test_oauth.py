@@ -510,7 +510,8 @@ def test_upwork_page_shows_status_and_expiry(logged_in, config):
     oauth_client = UpworkOAuth(config, app.state.settings, app.state.db)
     put_tokens(oauth_client)
     html = c.get("/upwork").text
-    assert "Connected." in html and "UTC" in html and "Disconnect" in html
+    assert "Connected" in html and "Not connected" not in html
+    assert "UTC" in html and "Disconnect" in html
     assert oauth_client.store.load().expires_at in html
     assert "OLD-AT" not in html and "OLD-RT" not in html
     assert f"{BASE}/oauth/client-metadata.json" in html
