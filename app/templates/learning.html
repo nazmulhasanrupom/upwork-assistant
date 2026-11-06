@@ -2,10 +2,12 @@
 {% from "_macros.html" import button, flash, pill %}
 {% block title %}Learning{% endblock %}
 {% block content %}
+{% from "_macros.html" import growth_tabs as _tabs %}
 <div class="page-head">
   <h1>Learning history</h1>
   <p class="muted">Every time the assistant changes its own memory, playbook or skills, one entry is saved here. "Undo" adds a new entry that reverses that one change. It never touches Upwork.</p>
 </div>
+{{ _tabs("/learning") }}
 
 {% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}

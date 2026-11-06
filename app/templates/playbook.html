@@ -2,10 +2,12 @@
 {% from "_macros.html" import flash, pill %}
 {% block title %}Playbook{% endblock %}
 {% block content %}
+{% from "_macros.html" import growth_tabs as _tabs %}
 <div class="page-head">
   <h1>Playbook and tests</h1>
   <p class="muted">What to try on your Upwork profile, one change at a time. A test runs {{ test_days }} days and is judged with 7-day averages. This page only shows the state: it changes nothing on Upwork.</p>
 </div>
+{{ _tabs("/playbook") }}
 
 <section aria-labelledby="pb-state">
   <h2 id="pb-state">Test status</h2>

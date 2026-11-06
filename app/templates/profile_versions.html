@@ -2,10 +2,12 @@
 {% from "_macros.html" import button, flash, pill %}
 {% block title %}Profile history{% endblock %}
 {% block content %}
+{% from "_macros.html" import growth_tabs as _tabs %}
 <div class="page-head">
   <h1>Profile history</h1>
   <p class="muted">Saved copies of your Upwork profile (title, overview, skills, rate). A copy is saved every day and before any change, only when something changed. The newest {{ keep }} are kept. "Roll back" asks for your approval first and never changes Upwork by itself.{% if dry_run %} Dry-run is on.{% endif %}</p>
 </div>
+{{ _tabs("/profile/versions") }}
 
 {% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
 

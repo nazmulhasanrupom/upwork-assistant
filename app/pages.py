@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import charts, job_actions
+from app import approvals, charts, job_actions
 from app import costs as cost_totals
 from app import metrics as metrics_data
 from app import rank as rank_data
@@ -212,7 +212,17 @@ def dashboard_data(
         ).fetchone()[0]
         for t in ("MID", "HIGH")
     }
+    best_jobs = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT job_id, title, tier, fit_score, rate_paid FROM jobs "
+            "WHERE tier IN ('HIGH', 'MID') AND status != 'dropped' AND first_seen >= ? "
+            "ORDER BY (tier = 'HIGH') DESC, COALESCE(fit_score, -1) DESC, first_seen DESC LIMIT 5",
+            (since,),
+        )
+    ]
     return {
+        "best_jobs": best_jobs,
         "connects": connects,
         "low_connects": low_connects,
         "last_runs": last_runs,
@@ -305,8 +315,15 @@ def runs_panel(request: Request) -> dict:
 def dashboard(request: Request, msg: str = "") -> Response:
     s = request.app.state
     data = dashboard_data(s.db, _tz(request), config=s.config, settings=s.settings)
+    todo = approvals.pending_items(s.db, s.settings) if s.settings is not None else []
     return render(
-        request, "dashboard.html", **data, **runs_panel(request), notice=RUN_MESSAGES.get(msg)
+        request,
+        "dashboard.html",
+        **data,
+        **runs_panel(request),
+        notice=RUN_MESSAGES.get(msg),
+        todo=todo[:5],
+        waiting=approvals.pending_count(s.db, s.settings),
     )
 
 

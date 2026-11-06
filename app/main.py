@@ -16,6 +16,7 @@ from app.config import Config, load_config
 from app.context_routes import router as context_router
 from app.db import init_db
 from app.gmail_routes import router as gmail_router
+from app.help import help_text
 from app.inbox_routes import router as inbox_router
 from app.job_routes import router as job_router
 from app.learning_routes import router as learning_router
@@ -75,7 +76,19 @@ def create_app(config: Config | None = None) -> FastAPI:
             logging.getLogger("approvals").exception("Could not count pending approvals")
             return 0
 
+    def _flag(key: str):
+        def read() -> bool:
+            try:
+                return bool(app.state.settings.get(key))
+            except Exception:
+                return False
+
+        return read
+
     app.state.templates.env.globals["approvals_pending"] = approvals_pending
+    app.state.templates.env.globals["nav_dry_run"] = _flag("general.dry_run")
+    app.state.templates.env.globals["nav_kill_switch"] = _flag("general.kill_switch")
+    app.state.templates.env.globals["help_text"] = help_text
     app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 
     @app.middleware("http")

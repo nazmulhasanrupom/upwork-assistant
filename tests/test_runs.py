@@ -64,7 +64,7 @@ def test_empty_page(web):
     r = client.get("/runs")
     assert r.status_code == 200 and "No runs yet" in r.text
     assert stat_value(r.text, "cost-today") == "$0.00" and "0% used" in r.text
-    assert 'aria-current="page">Runs' in r.text
+    assert '<a href="/runs">Runs</a>' in r.text  # in the gear menu
 
 
 # ---------- cost totals ----------

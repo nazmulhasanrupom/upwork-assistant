@@ -48,7 +48,7 @@ def test_pages_need_login(config, path):
 def test_empty_pages_render(web):
     _, client = web
     r = client.get("/")
-    assert r.status_code == 200 and "Dashboard" in r.text and "owner" in r.text
+    assert r.status_code == 200 and "Home" in r.text
     assert "No Connects balance seen yet" in r.text and "never run" in r.text
     r = client.get("/jobs")
     assert r.status_code == 200 and "No jobs match" in r.text
@@ -61,7 +61,7 @@ def test_dashboard_with_low_connects(web, config):
     assert r.status_code == 200
     assert 'class="stat warn" id="connects"' in r.text and "<strong>5</strong>" in r.text
     assert "below the 12 needed" in r.text  # alert row
-    assert stat(r.text, "stat-mid") == "3" and stat(r.text, "stat-high") == "2"
+    assert stat(r.text, "stat-good") == "5" and "2 high, 3 mid" in r.text
     assert 'class="status ok"' in r.text
 
 

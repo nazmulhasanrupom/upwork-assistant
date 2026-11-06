@@ -1,49 +1,60 @@
-{% from "_macros.html" import button %}
+{% from "_macros.html" import button, icon %}
 {% set path = request.url.path if request else "" %}
-{% macro nav_link(href, label, active, count=0) -%}
-<a href="{{ href }}"{% if active %} aria-current="page"{% endif %}>{{ label }}{% if count %} <span class="nav-count" aria-label="{{ count }} waiting">{{ count }}</span>{% endif %}</a>
+{% macro nav_link(href, label, active, count=0, icon_name="") -%}
+<a href="{{ href }}"{% if active %} aria-current="page"{% endif %}>{% if icon_name %}{{ icon(icon_name) }}{% endif %}<span class="nav-label">{{ label }}</span>{% if count %} <span class="nav-count" aria-label="{{ count }} waiting">{{ count }}</span>{% endif %}</a>
 {%- endmacro %}
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if request and request.cookies.get('theme') in ('light', 'dark') %} data-theme="{{ request.cookies.get('theme') }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}Upwork Assistant{% endblock %} - Upwork Assistant</title>
+  <link rel="preload" href="/static/fonts/Inter.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/copy.js" defer></script>
+  <script src="/static/info.js" defer></script>
+  <script src="/static/notice.js" defer></script>
 </head>
+{% set growth = path.startswith(("/context", "/profile", "/playbook", "/trends", "/reports", "/learning")) %}
+{% set jobs_on = path.startswith(("/jobs", "/review")) %}
+{% set pending = approvals_pending() if approvals_pending is defined else 0 %}
 <body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="/">Upwork Assistant</a>
       {% if user %}
-      <nav aria-label="Main">
-        {{ nav_link("/", "Dashboard", path == "/") }}
-        {{ nav_link("/jobs", "Jobs", path.startswith("/jobs")) }}
-        {{ nav_link("/approvals", "Approvals", path.startswith("/approvals"), approvals_pending() if approvals_pending is defined else 0) }}
-        {{ nav_link("/inbox", "Inbox", path.startswith("/inbox")) }}
-        {{ nav_link("/review", "Review", path.startswith("/review")) }}
-        {{ nav_link("/runs", "Runs", path.startswith("/runs")) }}
-        {{ nav_link("/context", "Profile", path.startswith("/context")) }}
-        {{ nav_link("/profile/versions", "Profile history", path.startswith("/profile")) }}
-        {{ nav_link("/playbook", "Playbook", path.startswith("/playbook")) }}
-        {{ nav_link("/trends", "Trends", path.startswith("/trends")) }}
-        {{ nav_link("/reports", "Reports", path.startswith("/reports")) }}
-        {{ nav_link("/learning", "Learning", path.startswith("/learning")) }}
-        {{ nav_link("/upwork", "Upwork", path.startswith("/upwork")) }}
-        {{ nav_link("/setup", "Setup", path.startswith("/setup")) }}
-        {{ nav_link("/settings", "Settings", path == "/settings" or (path.startswith("/settings/") and not path.startswith("/settings/email"))) }}
-        {{ nav_link("/settings/email", "Email", path.startswith("/settings/email")) }}
+      <nav aria-label="Main" class="mainnav">
+        {{ nav_link("/", "Home", path == "/", icon_name="home") }}
+        {{ nav_link("/approvals", "To do", path.startswith("/approvals"), pending, icon_name="list-todo") }}
+        {{ nav_link("/jobs", "Jobs", jobs_on, icon_name="briefcase") }}
+        {{ nav_link("/inbox", "Inbox", path.startswith("/inbox"), icon_name="inbox") }}
+        {{ nav_link("/context", "Growth", growth, icon_name="trending-up") }}
       </nav>
-      <form method="post" action="/logout" class="inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        {{ button("Log out", "secondary", small=true) }}
-      </form>
+      <div class="topbar-right">
+        {% if nav_dry_run is defined and nav_dry_run() %}<a class="pill warn" href="/settings">Dry-run</a>{% endif %}
+        {% if nav_kill_switch is defined and nav_kill_switch() %}<a class="pill bad" href="/settings">Stopped</a>{% endif %}
+        <details class="gear">
+          <summary aria-label="Menu">{{ icon("settings") }}</summary>
+          <div class="gear-menu">
+            <a href="/settings">Settings</a>
+            <a href="/settings/email">Email</a>
+            <a href="/upwork">Upwork</a>
+            <a href="/runs">Runs</a>
+            <a href="/setup">Setup</a>
+            <form method="post" action="/logout" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit">Log out</button>
+            </form>
+          </div>
+        </details>
+      </div>
       {% endif %}
     </div>
   </header>
+  {% set note = request.query_params.get("msg") if request else "" %}
+  {% if note %}<div class="notice flash {{ 'error' if request.query_params.get('err') else 'ok' }}" data-notice role="{{ 'alert' if request.query_params.get('err') else 'status' }}"><span class="flash-text">{{ note[:300] }}</span></div>{% endif %}
   <main class="{% block main_class %}wide{% endblock %}">
     {% block content %}{% endblock %}
   </main>

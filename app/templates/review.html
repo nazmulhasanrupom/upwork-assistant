@@ -2,10 +2,12 @@
 {% from "_macros.html" import button, flash, card, pill %}
 {% block title %}Review a proposal{% endblock %}
 {% block content %}
+{% from "_macros.html" import jobs_tabs as _tabs %}
 <div class="page-head">
   <h1>Review a proposal</h1>
   <p class="muted">Paste your draft before you send it. Python checks the spelling and spacing for free, then one Claude call checks the job's own instructions, your first two lines, your proof and your answers, and writes a fixed version. Nothing is sent to Upwork.</p>
 </div>
+{{ _tabs("/review") }}
 {% if error %}{{ flash("error", error) }}{% endif %}
 
 {% call card("1. Which job?") %}

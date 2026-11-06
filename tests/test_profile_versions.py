@@ -234,7 +234,7 @@ def test_page_empty_and_nav_link(web):
     r = client.get("/profile/versions")
     assert r.status_code == 200
     assert "No copy is saved yet" in r.text
-    assert 'href="/profile/versions"' in r.text and 'aria-current="page">Profile history' in r.text
+    assert 'href="/profile/versions"' in r.text and 'aria-current="page">History' in r.text
 
 
 def test_page_lists_versions_and_shows_diff(web):

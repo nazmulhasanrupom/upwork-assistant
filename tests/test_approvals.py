@@ -77,8 +77,9 @@ def test_empty_page_and_nav(web):
     _, client = web
     r = client.get("/approvals")
     assert r.status_code == 200
-    assert "No proposal preview is waiting" in r.text and "No other change is waiting" in r.text
-    assert 'href="/approvals"' in r.text and 'aria-current="page">Approvals' in r.text
+    assert "Nothing is waiting for you" in r.text
+    assert 'href="/approvals"' in r.text and 'aria-current="page"' in r.text
+    assert 'nav-label">To do' in r.text
     assert "nav-count" not in r.text  # nothing pending: no number
 
 

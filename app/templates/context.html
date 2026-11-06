@@ -3,10 +3,12 @@
 {% block title %}Profile context{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
+{% from "_macros.html" import growth_tabs as _tabs %}
 <div class="page-head">
   <h1>Profile context</h1>
   <p class="muted">Claude reads these two files on every judging and writing run. Keep them short and true.</p>
 </div>
+{{ _tabs("/context") }}
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 {% if counts.over %}{{ flash("warn", "USER.md and MEMORY.md together are " ~ counts.total ~ " characters, over the " ~ counts.cap ~ " character cap. Shorten them so every run stays cheap and focused.") }}{% endif %}

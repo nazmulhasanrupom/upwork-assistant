@@ -1,11 +1,22 @@
 {% extends "base.html" %}
-{% from "_macros.html" import flash, stat, button, card %}
-{% block title %}Dashboard{% endblock %}
+{% from "_macros.html" import flash, stat, button, card, page_header, pill, icon, info, empty %}
+{% block title %}Home{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Dashboard</h1>
-  <p class="muted">Signed in as {{ user }}. New today: {{ today }}.</p>
-</div>
+{% set ns = namespace(last="") %}
+{% for r in last_runs.values() if r %}{% if r.started > ns.last %}{% set ns.last = r.started %}{% endif %}{% endfor %}
+{% call page_header("Home") %}
+  {% if ns.last %}<span class="muted small" id="last-run">Last run {{ ns.last | dt }}</span>{% endif %}
+  {% if kill_switch %}
+  <button class="btn btn-secondary" type="button" disabled>Run now</button> <span class="small muted">kill switch is on</span>
+  {% elif any_busy %}
+  <button class="btn btn-secondary" type="button" disabled>Running</button>
+  {% else %}
+  <form method="post" action="/tasks/daily/run" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Run now", "primary", icon_name="play") }}
+  </form>
+  {% endif %}
+{% endcall %}
 
 {% if notice %}
 <section aria-label="Run now" class="alerts">
@@ -33,24 +44,50 @@
 {% endif %}
 
 <section aria-label="Numbers" class="stats">
+  {{ stat("New good jobs today", counts.HIGH + counts.MID, counts.HIGH ~ " high, " ~ counts.MID ~ " mid", "", "stat-good", help_key="dashboard.good_jobs") }}
+  {{ stat("Waiting in To do", waiting, "", "", "stat-waiting", help_key="dashboard.waiting") }}
   {% if connects %}
   {% set hint %}{% if connects.needed is not none %}Top job needs {{ connects.needed }}. {% endif %}Seen {{ connects.seen_at | dt }}{% endset %}
-  {{ stat("Connects", connects.balance, hint, "warn" if low_connects else "", "connects") }}
+  {{ stat("Connects left", connects.balance, hint, "warn" if low_connects else "", "connects", help_key="dashboard.connects") }}
   {% else %}
-  {{ stat("Connects", "-", "No Connects balance seen yet. It is read when the daily task fetches a job.", "", "connects") }}
+  {{ stat("Connects left", "-", "No Connects balance seen yet.", "", "connects", help_key="dashboard.connects") }}
   {% endif %}
-  {{ stat("New HIGH", counts.HIGH, "since midnight", "", "stat-high") }}
-  {{ stat("New MID", counts.MID, "since midnight", "", "stat-mid") }}
   {% if costs %}
   {% set cost_hint %}Week ${{ "%.2f"|format(costs.week) }}, month ${{ "%.2f"|format(costs.month) }} of ${{ "%.0f"|format(costs.cap) }} cap ({{ costs.percent }}%){% endset %}
-  {{ stat("Claude cost today", "$" ~ "%.2f"|format(costs.today), cost_hint, "warn" if costs.warn or costs.reached else "", "cost") }}
-  {% endif %}
-  {% if waiting is defined and waiting is not none %}
-  {{ stat("Waiting approval", waiting, "", "", "stat-waiting") }}
+  {{ stat("Claude cost this month", "$" ~ "%.2f"|format(costs.month), cost_hint, "warn" if costs.warn or costs.reached else "", "cost", help_key="dashboard.cost") }}
   {% endif %}
 </section>
+
+<div class="home-grid">
+  {% call card("To do", help_key="dashboard.todo") %}
+    {% if todo %}
+    <ul class="mini-list" id="home-todo">
+      {% for it in todo %}
+      <li><span class="mini-title">{{ icon("list-todo") }} {{ it.title }}</span><span class="mini-meta">{{ it.kind }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    {{ empty("check-square", "Nothing is waiting for you.") }}
+    {% endif %}
+    {{ button("Open all", "secondary", href="/approvals") }}
+  {% endcall %}
+  {% call card("Best jobs today", help_key="dashboard.best_jobs") %}
+    {% if best_jobs %}
+    <ul class="mini-list" id="home-best-jobs">
+      {% for j in best_jobs %}
+      <li><span class="mini-title"><a href="/jobs/{{ j.job_id }}">{{ j.title or j.job_id }}</a></span>
+        <span class="mini-meta">{{ pill(j.tier, "ok" if j.tier == "HIGH" else "") }}{% if j.fit_score is not none %} {{ j.fit_score }}{% endif %}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    {{ empty("briefcase", "No good jobs yet today.") }}
+    {% endif %}
+    {{ button("See jobs", "secondary", href="/jobs") }}
+  {% endcall %}
+</div>
+
 {% if metrics and metrics.enabled %}
-<h2>This week</h2>
+<h2>This week{{ info("dashboard.weekly") }}</h2>
 <section aria-label="This week" id="metrics-card" class="stats">
   {% if metrics.row %}
   {% set m = metrics.row %}
@@ -67,9 +104,8 @@
   {% endif %}
 </section>
 <section aria-label="Profile views" class="card panel" id="profile-views">
-  <h2 class="card-title">Profile views</h2>
-  <p class="muted small">Upwork shows no number we can read. Look at your profile stats once a week and type it here (week of {{ metrics.week_start }}).
-    {% if metrics.views_last_week is not none %}Last week: {{ metrics.views_last_week }}.{% endif %}</p>
+  <h2 class="card-title">Profile views{{ info("dashboard.profile_views") }}</h2>
+  <p class="muted small">Week of {{ metrics.week_start }}.{% if metrics.views_last_week is not none %} Last week: {{ metrics.views_last_week }}.{% endif %}</p>
   <form method="post" action="/metrics/profile-views" class="filters inline-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label class="field"><span>Views this week</span>
@@ -81,22 +117,22 @@
 {% endif %}
 
 {% if charts %}
-<h2>Proposal funnel</h2>
+<h2>Proposal funnel{{ info("dashboard.funnel") }}</h2>
 <section aria-label="Proposal funnel" class="card panel" id="funnel-chart">
   {% if charts.funnel_svg %}
   <ul class="legend" aria-label="Legend">
     {% for key, label, cls in charts.funnel.series %}<li><span class="swatch {{ cls }}"></span>{{ label }}</li>{% endfor %}
   </ul>
   {{ charts.funnel_svg }}
-  <p class="muted small">Proposals by the week they were sent, last {{ charts.funnel_weeks }} weeks. "Viewed" = seen by the client. Interviews and hires follow the proposal status.</p>
+  <p class="muted small">Last {{ charts.funnel_weeks }} weeks.</p>
   {% else %}
-  <p class="muted">No proposals stored for the last {{ charts.funnel_weeks }} weeks yet. They appear after the daily run has synced your sent proposals.</p>
+  <p class="muted">No proposals stored for the last {{ charts.funnel_weeks }} weeks yet.</p>
   {% endif %}
 </section>
 {% endif %}
 
 {% if rank and rank.enabled %}
-<h2>Keyword rank</h2>
+<h2>Keyword rank{{ info("dashboard.rank") }}</h2>
 <section aria-label="Keyword rank" id="rank-card">
   {% if rank.entries %}
   <div class="table-wrap">
@@ -114,11 +150,10 @@
       </tbody>
     </table>
   </div>
-  {% if not rank.any %}<p class="muted small">No rank check yet. It runs once a day, in the first daily run after {{ "%02d"|format(rank.run_hour) }}:00.</p>{% endif %}
-  <p class="muted small">Place in Upwork's freelancer search. Organic skips paid (boosted) results. "-" means no check yet.</p>
+  {% if not rank.any %}<p class="muted small">No rank check yet. Next run after {{ "%02d"|format(rank.run_hour) }}:00.</p>{% endif %}
+  <p class="muted small">Organic{{ info("dashboard.rank_table") }}</p>
   {% if charts %}
   <h3 class="chart-heading">Rank, last {{ charts.rank_days }} days</h3>
-  <p class="muted small">Lower is better: place 1 is at the top. A cross at the bottom = not found that day.</p>
   <ul class="chart-grid" id="rank-charts">
     {% for r in charts.ranks %}
     <li class="card panel">
@@ -134,8 +169,6 @@
 </section>
 {% endif %}
 
-<p>{{ button("See jobs", "secondary", href="/jobs") }} {{ button("Runs and costs", "secondary", href="/runs") }}</p>
-
-<h2>Last runs</h2>
+<h2>Last runs{{ info("dashboard.runs") }} <a class="btn btn-ghost btn-sm" href="/runs">Runs and costs</a></h2>
 {% include "_runs_table.html" %}
 {% endblock %}

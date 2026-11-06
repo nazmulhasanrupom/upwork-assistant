@@ -77,7 +77,12 @@ def _test_panel(request: Request) -> dict:
     }
 
 
-def _page(request: Request, status: int = 200, notice: tuple[str, str] | None = None) -> Response:
+def _page(
+    request: Request,
+    status: int = 200,
+    notice: tuple[str, str] | None = None,
+    kind: str = "",
+) -> Response:
     s = request.app.state
     approvals.expire_old(s.db, s.settings)
     items = approvals.pending_items(s.db, s.settings)
@@ -85,8 +90,11 @@ def _page(request: Request, status: int = 200, notice: tuple[str, str] | None = 
         request,
         "approvals.html",
         status,
-        proposals=approvals.open_previews(s.db, s.settings),
-        items=items,
+        proposals=[] if kind and kind != "proposal" else approvals.open_previews(s.db, s.settings),
+        proposal_count=len(approvals.open_previews(s.db, s.settings)),
+        items=[it for it in items if not kind or it["kind"] == kind],
+        all_items=items,
+        kind=kind,
         decided=approvals.recent_decided(s.db),
         dry_run=bool(s.settings.get("general.dry_run")),
         notice=notice,
@@ -107,8 +115,9 @@ def _page(request: Request, status: int = 200, notice: tuple[str, str] | None = 
 
 
 @router.get("/approvals")
-def approvals_page(request: Request, done: str = "") -> Response:
-    return _page(request, notice=NOTICES.get(done))  # only fixed texts, never the query itself
+def approvals_page(request: Request, done: str = "", kind: str = "") -> Response:
+    # only fixed texts, never the query itself
+    return _page(request, notice=NOTICES.get(done), kind=kind[:40])
 
 
 def _context(request: Request, *, confirm: bool = False) -> dict:

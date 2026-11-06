@@ -101,7 +101,8 @@ def test_empty_page_and_nav(web):
     r = client.get("/inbox")
     assert r.status_code == 200
     assert "No invitation is waiting" in r.text and "No chat room is stored yet" in r.text
-    assert 'aria-current="page">Inbox' in r.text and "Not read yet" in r.text
+    assert 'aria-current="page"' in r.text and 'nav-label">Inbox' in r.text
+    assert "Not read yet" in r.text
 
 
 def test_get_messages_is_a_read_tool():

@@ -633,7 +633,7 @@ def test_dashboard_empty_states(web):
     _, client = web
     html = client.get("/").text
     assert 'id="funnel-chart"' in html and "No proposals stored" in html
-    assert "<svg" not in html
+    assert "<svg" not in html.split("<main", 1)[1]  # no chart drawn (nav icons are outside main)
     assert 'id="rank-charts"' in html and html.count("No checks in this period yet") == 2
 
 

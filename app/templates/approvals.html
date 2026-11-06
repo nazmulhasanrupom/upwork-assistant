@@ -1,44 +1,120 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, pill %}
-{% block title %}Approvals{% endblock %}
+{% from "_macros.html" import button, flash, pill, info, icon, page_header, empty %}
+{% set write_kinds = ["profile_change", "profile_rollback", "profile"] %}
+{% set kind_icons = {"keywords": "search", "profile_change": "file-text", "profile_rollback": "history", "profile": "file-text", "playbook_update": "list-todo", "skill_patch": "check-square"} %}
+{% block title %}To do{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Approvals</h1>
-  <p class="muted">Everything that waits for your click. Nothing here is sent to Upwork by itself.{% if dry_run %} Dry-run is on: an approved proposal is blocked at the last step and only logged.{% endif %}</p>
-</div>
+{% call page_header("To do", "approvals.pending") %}
+  {% if small %}
+  <form method="post" action="/approvals/small/approve" class="inline" id="batch-small">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Approve all small changes (" ~ (small | length) ~ ")", "secondary", icon_name="check") }}{{ info("approvals.small") }}
+  </form>
+  {% endif %}
+{% endcall %}
 
 {% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
+{% if dry_run %}{{ flash("warn", "Dry-run is on. An approved proposal is blocked at the last step and only logged.") }}{% endif %}
 
-<section aria-labelledby="ap-proposals">
-  <h2 id="ap-proposals">Proposals ready to send <span class="count">{{ proposals | length }}</span></h2>
-  {% if proposals %}
-  <div class="table-wrap">
-  <table class="table" id="approvals-proposals">
-    <thead><tr>
-      <th scope="col">Job</th><th scope="col" class="num">Connects</th><th scope="col">Prepared</th><th scope="col">Status</th><th scope="col">Action</th>
-    </tr></thead>
-    <tbody>
-    {% for p in proposals %}
-    <tr>
-      <th scope="row">{% if p.link %}<a href="{{ p.link }}">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}</th>
-      <td class="num">{{ p.connects_cost if p.connects_cost is not none else "n/a" }}{% if p.connects_balance is not none %} <span class="muted small">of {{ p.connects_balance }}</span>{% endif %}</td>
-      <td>{{ p.created_at | dt }}</td>
-      <td>{% if p.dry_run_blocked %}{{ pill("Blocked by dry-run", "warn") }}{% else %}{{ pill("Preview ready", "ok") }}{% endif %}</td>
-      <td>{% if p.link %}{{ button("Review and approve", "primary", href=p.link, small=true) }}{% else %}<span class="muted small">n/a</span>{% endif %}</td>
-    </tr>
+{% set kinds = all_items | map(attribute="kind") | unique | list %}
+{% if kinds or proposal_count %}
+<nav class="filter-chips" aria-label="Filter by kind">
+  <a class="filter-chip" href="/approvals"{% if not kind %} aria-current="true"{% endif %}>All</a>
+  {% if proposal_count %}<a class="filter-chip" href="/approvals?kind=proposal"{% if kind == "proposal" %} aria-current="true"{% endif %}>proposal</a>{% endif %}
+  {% for k in kinds %}<a class="filter-chip" href="/approvals?kind={{ k }}"{% if kind == k %} aria-current="true"{% endif %}>{{ k }}</a>{% endfor %}
+</nav>
+{% endif %}
+
+{% set rows = (proposals + items) | sort(attribute="created_at", reverse=true) %}
+<section aria-label="To do list" id="todo-list">
+  {% if rows %}
+  <ul class="todo-list approval-list">
+    {% for it in rows %}
+    {% if it.kind is defined %}
+    <li class="card todo-row" id="approval-{{ it.id }}">
+      <div class="todo-main">
+        <div class="card-head">{{ icon(kind_icons.get(it.kind, "list-todo")) }} {{ pill(it.kind) }} <span class="muted small">{{ it.created_at | dt }}</span></div>
+        <h3 class="card-job-title">{{ it.title }}</h3>
+        {% if it.kind in write_kinds %}
+        <p class="small writes"><strong>Goes live on Upwork</strong> only after you confirm the preview.{% if dry_run %} {{ pill("Dry-run: logged only", "warn") }}{% endif %}</p>
+        {% endif %}
+        {% if it.kind == "keywords" and it.after_data and it.after_data.picks %}
+        <div class="table-wrap">
+        <table class="table kw-table" id="keywords-picks-{{ it.id }}">
+          <thead><tr>
+            <th scope="col">Keyword</th><th scope="col" class="num">Demand (jobs)</th><th scope="col" class="num">Competition (freelancers)</th><th scope="col" class="num">My rank</th><th scope="col">Why</th>
+          </tr></thead>
+          <tbody>
+          {% for p in it.after_data.picks %}
+          <tr>
+            <th scope="row">{{ p.keyword }}</th>
+            <td class="num">{{ p.demand if p.demand is not none else "n/a" }}</td>
+            <td class="num">{{ p.competition if p.competition is not none else "n/a" }}</td>
+            <td class="num">{% if p.my_rank is not none %}#{{ p.my_rank }}{% elif p.rank_status == "not_found" %}not in top {{ p.rank_pages_seen }}{% else %}unknown{% endif %}</td>
+            <td>{{ p.reason }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        <p class="small muted">Now checked: {{ (it.before_data or []) | join(", ") or "nothing" }}{{ info("approvals.keywords_pick") }}</p>
+        {% elif it.kind in ("profile_rollback", "profile_change") and rollbacks.get(it.id) %}
+        {% if it.kind == "profile_change" and metas.get(it.id) %}
+        <p class="small"><strong>Tactic:</strong> {{ metas[it.id].tactic }}</p>
+        {% if metas[it.id].reason %}<p class="small muted">Why: {{ metas[it.id].reason }}</p>{% endif %}
+        {% if metas[it.id].summary %}<p class="small muted">Change: {{ metas[it.id].summary }}</p>{% endif %}
+        {% endif %}
+        {% for f in rollbacks[it.id] if f.changed and f.restorable %}
+        <h4>{{ f.label }}</h4>
+        <div class="difftext">{% for kind_, text in f.ops %}{% if kind_ == "ins" %}<ins>{{ text }}</ins>{% elif kind_ == "del" %}<del>{{ text }}</del>{% else %}{{ text }}{% endif %}{% endfor %}</div>
+        {% endfor %}
+        <p class="small muted">Before -> after{{ info("approvals.rollback") }}</p>
+        {% elif it.kind == "playbook_update" and it.after_data %}
+        <pre class="text">{{ it.after_data.summary }}</pre>
+        <p class="small muted">Playbook only{{ info("approvals.playbook") }}</p>
+        {% elif it.before or it.after %}
+        <div class="before-after">
+          {% if it.before %}<div><h4>Before</h4><pre class="text">{{ it.before }}</pre></div>{% endif %}
+          {% if it.after %}<div><h4>After</h4><pre class="text">{{ it.after }}</pre></div>{% endif %}
+        </div>
+        {% endif %}
+        {% if not it.has_handler %}<p class="muted small">Decision is only recorded{{ info("approvals.no_handler") }}</p>{% endif %}
+      </div>
+      <div class="actions todo-actions">
+        <form method="post" action="/approvals/{{ it.id }}/approve" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {{ button("Approve", "primary", small=true, icon_name="check") }}
+        </form>
+        <form method="post" action="/approvals/{{ it.id }}/reject" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {{ button("Reject", "secondary", small=true, icon_name="x") }}
+        </form>
+      </div>
+    </li>
+    {% else %}
+    {% set p = it %}
+    <li class="card todo-row" id="proposal-{{ loop.index }}">
+      <div class="todo-main">
+        <div class="card-head">{{ icon("briefcase") }} {{ pill("proposal") }} <span class="muted small">{{ p.created_at | dt }}</span>
+          {% if p.dry_run_blocked %}{{ pill("Blocked by dry-run", "warn") }}{% else %}{{ pill("Preview ready", "ok") }}{% endif %}</div>
+        <h3 class="card-job-title">{% if p.link %}<a href="{{ p.link }}">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}</h3>
+        <p class="small writes"><strong>Costs {{ p.connects_cost if p.connects_cost is not none else "n/a" }} Connects</strong>{% if p.connects_balance is not none %} <span class="muted">of {{ p.connects_balance }}</span>{% endif %}. Goes live on Upwork only after you confirm.{{ info("approvals.proposals") }}</p>
+      </div>
+      <div class="actions todo-actions">
+        {% if p.link %}{{ button("Review and approve", "primary", href=p.link, small=true) }}{% else %}<span class="muted small">n/a</span>{% endif %}
+      </div>
+    </li>
+    {% endif %}
     {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  <p class="muted small">Approve happens on the job page, after you see the Connects cost, the boost and the questions. A preview that is too old is not listed: open the job and make it again.</p>
+  </ul>
   {% else %}
-  <p class="muted">No proposal preview is waiting.</p>
+  {{ empty("check-square", "Nothing is waiting for you.") }}
   {% endif %}
 </section>
 
-<section aria-labelledby="ap-keywords" id="keyword-discovery">
-  <h2 id="ap-keywords">Keyword discovery</h2>
-  <p class="muted">Measures {{ kw.seed_count }} seed keyword(s) on Upwork (open jobs, freelancers, your place in the search), then Claude picks the 3 to 5 best. You approve the pick below. Approving starts a baseline of {{ kw.baseline_days }} days with no profile change.{% if kw.baseline_active %} A baseline is running now (since {{ kw.started }}, {{ kw.days_left }} day(s) left).{% elif kw.started %} The last baseline started {{ kw.started }} and is over.{% endif %}</p>
+<section aria-labelledby="ap-keywords" id="keyword-discovery" class="card panel">
+  <h2 id="ap-keywords" class="card-title">Keyword discovery{{ info("approvals.keywords") }}</h2>
+  <p class="small muted">{{ kw.seed_count }} seed keyword(s), baseline {{ kw.baseline_days }} days.{% if kw.baseline_active %} A baseline is running now (since {{ kw.started }}, {{ kw.days_left }} day(s) left).{% elif kw.started %} The last baseline started {{ kw.started }} and is over.{% endif %}</p>
   {% if kw.running %}
   <p><button class="btn btn-secondary btn-sm" type="button" disabled>Running</button> <span class="small muted">{% if kw.since %}running since {{ kw.since | dt }}{% else %}just started{% endif %}. Reload this page in a minute.</span></p>
   {% elif kw.kill_switch %}
@@ -48,13 +124,13 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {{ button("Find keywords", "secondary", small=true) }}
   </form>
-  <span class="small muted">Uses about 20 to 50 Upwork reads and one Claude call.</span>
+  <span class="small muted">About 20 to 50 Upwork reads and one Claude call.</span>
   {% endif %}
 </section>
 
-<section aria-labelledby="ap-ptest" id="profile-test">
-  <h2 id="ap-ptest">Profile test</h2>
-  <p class="muted">One profile change at a time, tested for {{ pt.test_days }} days. Every {{ pt.every_days }} days Claude picks a tactic from the playbook and drafts the change from your USER.md facts. You see the before and after below. Nothing changes on Upwork until you approve it and then confirm the preview.</p>
+<section aria-labelledby="ap-ptest" id="profile-test" class="card panel">
+  <h2 id="ap-ptest" class="card-title">Profile test{{ info("approvals.profile_test") }}</h2>
+  <p class="small muted">Every {{ pt.every_days }} days, tested for {{ pt.test_days }} days.</p>
   {% if pt.running %}
   <p><button class="btn btn-secondary btn-sm" type="button" disabled>Running</button> <span class="small muted">{% if pt.since %}running since {{ pt.since | dt }}{% else %}just started{% endif %}. Reload this page in a minute.</span></p>
   {% elif pt.kill_switch %}
@@ -68,85 +144,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {{ button("Start a profile test", "secondary", small=true) }}
   </form>
-  <span class="small muted">Uses a few Upwork reads and two Claude calls.</span>
-  {% endif %}
-</section>
-
-{% if small %}
-<section aria-labelledby="ap-batch" id="batch-small">
-  <h2 id="ap-batch">Small profile changes <span class="count">{{ small | length }}</span></h2>
-  <p class="muted">These profile changes are small (at most {{ small_max_words }} words added or removed). One click approves all of them: Upwork makes a preview of each{% if batch_confirms %}, and each preview is confirmed right away{% endif %}.{% if dry_run %} Dry-run is on, so the confirm step is blocked and only logged.{% else %} The changes go live on your profile.{% endif %}</p>
-  <form method="post" action="/approvals/small/approve" class="inline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Approve all small changes (" ~ (small | length) ~ ")", "primary", small=true) }}
-  </form>
-</section>
-{% endif %}
-
-<section aria-labelledby="ap-items">
-  <h2 id="ap-items">Other changes <span class="count">{{ items | length }}</span></h2>
-  {% if items %}
-  <ul class="approval-list">
-    {% for it in items %}
-    <li class="card" id="approval-{{ it.id }}">
-      <div class="card-head">{{ pill(it.kind) }} <span class="muted small">{{ it.created_at | dt }}</span></div>
-      <h3 class="card-job-title">{{ it.title }}</h3>
-      {% if it.kind == "keywords" and it.after_data and it.after_data.picks %}
-      <div class="table-wrap">
-      <table class="table kw-table" id="keywords-picks-{{ it.id }}">
-        <thead><tr>
-          <th scope="col">Keyword</th><th scope="col" class="num">Demand (jobs)</th><th scope="col" class="num">Competition (freelancers)</th><th scope="col" class="num">My rank</th><th scope="col">Why</th>
-        </tr></thead>
-        <tbody>
-        {% for p in it.after_data.picks %}
-        <tr>
-          <th scope="row">{{ p.keyword }}</th>
-          <td class="num">{{ p.demand if p.demand is not none else "n/a" }}</td>
-          <td class="num">{{ p.competition if p.competition is not none else "n/a" }}</td>
-          <td class="num">{% if p.my_rank is not none %}#{{ p.my_rank }}{% elif p.rank_status == "not_found" %}not in top {{ p.rank_pages_seen }}{% else %}unknown{% endif %}</td>
-          <td>{{ p.reason }}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      </div>
-      <p class="small muted">Now checked: {{ (it.before_data or []) | join(", ") or "nothing" }}. Approve replaces this list with the keywords above and starts the baseline.</p>
-      {% elif it.kind in ("profile_rollback", "profile_change") and rollbacks.get(it.id) %}
-      {% if it.kind == "profile_change" and metas.get(it.id) %}
-      <p class="small"><strong>Tactic:</strong> {{ metas[it.id].tactic }}</p>
-      {% if metas[it.id].reason %}<p class="small muted">Why: {{ metas[it.id].reason }}</p>{% endif %}
-      {% if metas[it.id].summary %}<p class="small muted">Change: {{ metas[it.id].summary }}</p>{% endif %}
-      {% endif %}
-      {% for f in rollbacks[it.id] if f.changed and f.restorable %}
-      <h4>{{ f.label }}</h4>
-      <div class="difftext">{% for kind, text in f.ops %}{% if kind == "ins" %}<ins>{{ text }}</ins>{% elif kind == "del" %}<del>{{ text }}</del>{% else %}{{ text }}{% endif %}{% endfor %}</div>
-      {% endfor %}
-      <p class="small muted">Red = on your profile now, green = {% if it.kind == "profile_change" %}the new text{% else %}restored{% endif %}. Approve asks Upwork for a preview of each change and saves a copy of the current profile first. It changes nothing on Upwork by itself: you confirm the preview on the Profile history page.</p>
-      {% elif it.kind == "playbook_update" and it.after_data %}
-      <pre class="text">{{ it.after_data.summary }}</pre>
-      <p class="small muted">From the weekly web research. Approve changes the playbook; nothing on Upwork. Web pages are untrusted, so check the sources.</p>
-      {% elif it.before or it.after %}
-      <div class="before-after">
-        {% if it.before %}<div><h4>Before</h4><pre class="text">{{ it.before }}</pre></div>{% endif %}
-        {% if it.after %}<div><h4>After</h4><pre class="text">{{ it.after }}</pre></div>{% endif %}
-      </div>
-      {% endif %}
-      {% if not it.has_handler %}<p class="muted small">No automatic action is attached to this kind yet. Your decision is only recorded.</p>{% endif %}
-      <div class="actions">
-        <form method="post" action="/approvals/{{ it.id }}/approve" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          {{ button("Approve", "primary", small=true) }}
-        </form>
-        <form method="post" action="/approvals/{{ it.id }}/reject" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          {{ button("Reject", "secondary", small=true) }}
-        </form>
-      </div>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p class="muted">No other change is waiting.</p>
+  <span class="small muted">A few Upwork reads and two Claude calls.</span>
   {% endif %}
 </section>
 

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Reports{% endblock %}
 {% block content %}
+{% from "_macros.html" import growth_tabs as _tabs %}
 <div class="page-head">
   <h1>Reports</h1>
   <p class="muted">The weekly trend report and the monthly plan, newest first.
@@ -8,6 +9,7 @@
     <a href="/reports?kind=weekly"{% if kind == "weekly" %} aria-current="page"{% endif %}>Weekly</a> ·
     <a href="/reports?kind=monthly"{% if kind == "monthly" %} aria-current="page"{% endif %}>Monthly</a></p>
 </div>
+{{ _tabs("/reports") }}
 {% if rows %}
 <div class="table-wrap">
 <table class="table" id="reports-table">

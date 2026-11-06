@@ -2,10 +2,12 @@
 {% from "_macros.html" import flash %}
 {% block title %}Trends{% endblock %}
 {% block content %}
+{% from "_macros.html" import growth_tabs as _tabs %}
 <div class="page-head">
   <h1>Trends</h1>
   <p class="muted">Counted by Python from every job the daily run saw, also the ones it dropped. No Claude cost. The weekly task reads these numbers.</p>
 </div>
+{{ _tabs("/trends") }}
 
 <section aria-labelledby="tr-skills">
   <h2 id="tr-skills">Skills in demand</h2>

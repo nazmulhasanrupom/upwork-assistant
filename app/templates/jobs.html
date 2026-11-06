@@ -1,11 +1,13 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, job_card %}
+{% from "_macros.html" import button, job_card, info %}
 {% block title %}Jobs{% endblock %}
 {% block content %}
+{% from "_macros.html" import jobs_tabs as _tabs %}
 <div class="page-head">
-  <h1>Jobs</h1>
+  <h1>Jobs{{ info("jobs.score") }}</h1>
   <p class="muted">{{ total }} job(s). Page {{ page }} of {{ pages }}.</p>
 </div>
+{{ _tabs("/jobs") }}
 
 <form method="get" action="/jobs" class="filters">
   <label class="field"><span>Tier</span>

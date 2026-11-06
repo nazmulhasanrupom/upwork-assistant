@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, stat %}
+{% from "_macros.html" import button, flash, stat, info %}
 {% block title %}Runs and costs{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Runs and costs</h1>
+  <h1>Runs and costs{{ info("runs.cost") }}</h1>
   <p class="muted">Claude cost comes from the cost Claude reports for each call. Runs are the tasks the scheduler or you started.</p>
 </div>
 

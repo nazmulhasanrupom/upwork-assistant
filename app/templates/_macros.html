@@ -1,4 +1,4 @@
-{# Shared UI pieces. Import with: {% from "_macros.html" import badge, pill, chip, flash, stat, button, card, job_card %} #}
+{# Shared UI pieces. Import with: {% from "_macros.html" import page_header, tabs, card, stat, pill, button, empty, info, icon %} #}
 
 {% macro badge(tier, est=false) -%}
 <span class="badge {{ tier }}">{{ tier }}{% if est %} (est.){% endif %}</span>
@@ -22,21 +22,22 @@
 {%- endmacro %}
 
 {# kind: "" | warn | bad | good. value is the big number. #}
-{% macro stat(label, value, hint="", kind="", id="") -%}
+{% macro stat(label, value, hint="", kind="", id="", delta="", help_key="") -%}
 <div class="stat{% if kind %} {{ kind }}{% endif %}"{% if id %} id="{{ id }}"{% endif %}>
-  <div class="stat-label">{{ label }}</div>
+  <div class="stat-label">{{ label }}{% if help_key %}{{ info(help_key) }}{% endif %}</div>
   <div class="stat-value"><strong>{{ value }}</strong>{% if kind == "warn" %} {{ pill("Low", "warn") }}{% endif %}</div>
+  {% if delta %}{% set up = not (delta | string).startswith("-") %}<div class="stat-delta {{ 'up' if up else 'down' }}">{{ icon("trending-up") if up else "" }}{{ delta }}</div>{% endif %}
   {% if hint %}<div class="stat-hint">{{ hint }}</div>{% endif %}
 </div>
 {%- endmacro %}
 
-{# kind: primary | secondary | danger. With href it is a link, otherwise a submit button. #}
-{% macro button(label, kind="primary", href="", type="submit", small=false, external=false) -%}
+{# kind: primary | secondary | ghost | danger. With href it is a link, otherwise a submit button. icon: optional sprite name. #}
+{% macro button(label, kind="primary", href="", type="submit", small=false, external=false, icon_name="") -%}
 {%- set cls = "btn btn-" ~ kind ~ (" btn-sm" if small else "") -%}
 {%- if href -%}
-<a class="{{ cls }}" href="{{ href }}"{% if external %} rel="noopener noreferrer" target="_blank"{% endif %}>{{ label }}</a>
+<a class="{{ cls }}" href="{{ href }}"{% if external %} rel="noopener noreferrer" target="_blank"{% endif %}>{% if icon_name %}{{ icon(icon_name) }}{% endif %}{{ label }}</a>
 {%- else -%}
-<button class="{{ cls }}" type="{{ type }}">{{ label }}</button>
+<button class="{{ cls }}" type="{{ type }}">{% if icon_name %}{{ icon(icon_name) }}{% endif %}{{ label }}</button>
 {%- endif -%}
 {%- endmacro %}
 
@@ -46,11 +47,46 @@
 {%- endmacro %}
 
 {# A panel. Use {% call card("Title") %}...{% endcall %}. #}
-{% macro card(title="", cls="panel") -%}
+{% macro card(title="", cls="panel", help_key="") -%}
 <section class="card {{ cls }}">
-  {% if title %}<h2 class="card-title">{{ title }}</h2>{% endif %}
+  {% if title %}<h2 class="card-title">{{ title }}{% if help_key %}{{ info(help_key) }}{% endif %}</h2>{% endif %}
   {{ caller() }}
 </section>
+{%- endmacro %}
+
+{# Lucide icon from /static/icons.svg (16px, stroke 1.75 in CSS). Decorative: hidden from screen readers. #}
+{% macro icon(name) -%}
+<svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons.svg#i-{{ name }}"></use></svg>
+{%- endmacro %}
+
+{# The "i" help icon. Text comes from app/help.toml. Hover and focus by CSS; tap and Esc by info.js. #}
+{% macro info(key) -%}
+{%- set tip = "tip-" ~ (key | replace(".", "-")) -%}
+<span class="info-wrap"><button type="button" class="info" aria-label="Help" aria-describedby="{{ tip }}">i</button><span role="tooltip" id="{{ tip }}">{{ help_text(key) }}</span></span>
+{%- endmacro %}
+
+{# Page title with its "i" on the left and one primary action on the right. {% call page_header("Jobs", "jobs.score") %}...button...{% endcall %} #}
+{% macro page_header(title, help_key="") -%}
+<div class="page-header">
+  <h1>{{ title }}{% if help_key %}{{ info(help_key) }}{% endif %}</h1>
+  {% if caller %}<div class="page-header-action">{{ caller() }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{# items: list of (href, label) pairs; active: the href that is current. #}
+{% macro tabs(items, active="") -%}
+<nav class="tabs" aria-label="Sections">
+  {% for href, label in items %}<a href="{{ href }}"{% if href == active %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+</nav>
+{%- endmacro %}
+
+{# One icon, one line, one button. #}
+{% macro empty(icon_name, text, action_label="", action_href="") -%}
+<div class="empty-state">
+  {{ icon(icon_name) }}
+  <p>{{ text }}</p>
+  {% if action_label and action_href %}{{ button(action_label, "primary", href=action_href) }}{% endif %}
+</div>
 {%- endmacro %}
 
 {# One job in the jobs grid. #}
@@ -75,4 +111,12 @@
     <p class="card-foot muted small">First seen <time>{{ j.first_seen | dt }}</time></p>
   </article>
 </li>
+{%- endmacro %}
+
+{# Section tabs. Put them just under the page title. #}
+{% macro jobs_tabs(active) -%}
+{{ tabs([("/jobs", "Jobs"), ("/review", "Review")], active) }}
+{%- endmacro %}
+{% macro growth_tabs(active) -%}
+{{ tabs([("/context", "Profile"), ("/profile/versions", "History"), ("/playbook", "Playbook"), ("/trends", "Trends"), ("/reports", "Reports"), ("/learning", "Learning")], active) }}
 {%- endmacro %}
