@@ -17,6 +17,7 @@ from functools import cache
 from typing import Any
 
 import pyotp
+import segno
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from fastapi import HTTPException, Request
@@ -37,6 +38,7 @@ PUBLIC_PATHS = {
     "/healthz",
     "/login",
     "/setup/admin",
+    "/setup/admin/totp",
     "/setup/admin/confirm",
     "/oauth/client-metadata.json",
     "/oauth/callback",
@@ -77,6 +79,21 @@ def new_totp_secret() -> str:
 
 def provisioning_uri(secret: str, username: str) -> str:
     return pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name=ISSUER)
+
+
+def qr_svg(data: str) -> str:
+    """Inline SVG QR code, made on the server. Black on white with a 4-module quiet zone,
+    so it scans in dark mode too. No JS, no external service."""
+    qr = segno.make(data, error="m")
+    return qr.svg_inline(
+        scale=1,
+        border=4,
+        dark="#000",
+        light="#fff",
+        omitsize=True,
+        title="QR code for your authenticator app",
+        desc="Scan this code with an authenticator app to add the account.",
+    )
 
 
 def verify_totp(secret: str, code: str) -> bool:

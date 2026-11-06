@@ -5,7 +5,9 @@
 {% block content %}
 {% call card(cls="panel auth-card") %}
 <h1>Set up the authenticator app</h1>
-<p class="muted">Add this account in your authenticator app. Open the link on a phone, or type the key by hand.</p>
+<p class="muted">Scan this QR code with your authenticator app. Do not reload this page after you scan: a reload makes a new key.</p>
+<div class="qr">{{ qr_svg | safe }}</div>
+<p class="muted qr-help">Can't scan?</p>
 <p>Key: <code>{{ totp_secret }}</code></p>
 <p>Link: <code class="wrap">{{ otpauth_url }}</code></p>
 <p>Then enter the 6-digit code to finish.</p>

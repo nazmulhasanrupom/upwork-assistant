@@ -24,6 +24,10 @@ def csrf_from(html: str) -> str:
     return re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
 
 
+def totp_secret_from(html: str) -> str:
+    return re.search(r"<code>([A-Z2-7]+)</code>", html).group(1)
+
+
 def setup_admin(client) -> str:
     """Run the two-step first-user flow. Returns the TOTP secret."""
     token = csrf_from(client.get("/setup/admin").text)
@@ -37,8 +41,10 @@ def setup_admin(client) -> str:
             "csrf_token": token,
         },
     )
+    assert r.status_code == 303 and r.headers["location"] == "/setup/admin/totp"
+    r = client.get("/setup/admin/totp")
     assert r.status_code == 200
-    secret = re.search(r"<code>([A-Z2-7]+)</code>", r.text).group(1)
+    secret = totp_secret_from(r.text)
     r = client.post(
         "/setup/admin/confirm",
         data={"code": pyotp.TOTP(secret).now(), "csrf_token": csrf_from(r.text)},
@@ -112,10 +118,94 @@ def test_setup_wrong_totp_creates_nothing(config):
             "csrf_token": token,
         },
     )
+    r = client.get(r.headers["location"])
     bad = {"code": "000000", "csrf_token": csrf_from(r.text)}
     r = client.post("/setup/admin/confirm", data=bad)
     assert r.status_code == 400
     assert not auth.admin_exists(app.state.db)
+
+
+def _to_totp_page(client):
+    token = csrf_from(client.get("/setup/admin").text)
+    r = client.post(
+        "/setup/admin",
+        data={
+            "username": USER,
+            "password": PASSWORD,
+            "password2": PASSWORD,
+            "setup_code": client.setup_code,
+            "csrf_token": token,
+        },
+    )
+    assert r.status_code == 303
+    return client.get(r.headers["location"])
+
+
+def test_totp_page_shows_inline_svg_qr_of_the_otpauth_url(config):
+    _, client = make_client(config)
+    r = _to_totp_page(client)
+    assert r.status_code == 200
+    assert "<svg" in r.text and 'class="qr"' in r.text
+    assert "Can&#39;t scan?" in r.text or "Can't scan?" in r.text
+    assert "otpauth://totp/" in r.text  # link text stays under the QR code
+    assert totp_secret_from(r.text) in r.text
+    # no image file, no external service: the QR is inline (the only script is local htmx)
+    assert "<img" not in r.text and "data:image" not in r.text
+    assert 'src="http' not in r.text and "//" not in r.text.split("<svg")[1].split("</svg>")[0]
+    assert r.text.index("<svg") < r.text.index("Key:")
+
+
+def test_qr_svg_encodes_the_url_with_white_background():
+    import segno
+
+    url = auth.provisioning_uri(auth.new_totp_secret(), USER)
+    svg = auth.qr_svg(url)
+    assert svg.startswith("<svg") and 'fill="#fff"' in svg and "viewBox" in svg
+    assert svg != auth.qr_svg(auth.provisioning_uri(auth.new_totp_secret(), USER))
+    assert segno.make(url, error="m").svg_inline  # same lib, same input is accepted
+
+
+def test_reload_of_totp_page_makes_a_new_secret(config):
+    app, client = make_client(config)
+    first = _to_totp_page(client)
+    s1 = totp_secret_from(first.text)
+    second = client.get("/setup/admin/totp")
+    s2 = totp_secret_from(second.text)
+    assert s1 != s2
+    assert first.text.split("<svg")[1] != second.text.split("<svg")[1]
+    # the page after the reload is the one that counts: old secret no longer works
+    assert (
+        client.post(
+            "/setup/admin/confirm",
+            data={"code": pyotp.TOTP(s1).now(), "csrf_token": csrf_from(second.text)},
+        ).status_code
+        == 400
+    )
+    assert not auth.admin_exists(app.state.db)
+    # a wrong code keeps the same secret (no reload), and the newest secret finishes setup
+    r = client.post(
+        "/setup/admin/confirm",
+        data={"code": pyotp.TOTP(s2).now(), "csrf_token": csrf_from(second.text)},
+    )
+    assert r.status_code == 303 and auth.admin_exists(app.state.db)
+
+
+def test_wrong_code_page_keeps_the_same_secret(config):
+    _, client = make_client(config)
+    page = _to_totp_page(client)
+    s1 = totp_secret_from(page.text)
+    r = client.post(
+        "/setup/admin/confirm", data={"code": "000000", "csrf_token": csrf_from(page.text)}
+    )
+    assert r.status_code == 400 and totp_secret_from(r.text) == s1 and "<svg" in r.text
+
+
+def test_totp_page_without_first_step_redirects_and_404_after_setup(config):
+    _, client = make_client(config)
+    r = client.get("/setup/admin/totp")
+    assert r.status_code == 303 and r.headers["location"] == "/setup/admin"
+    setup_admin(client)
+    assert client.get("/setup/admin/totp").status_code == 404
 
 
 def test_wrong_password_wrong_totp_wrong_user(env):

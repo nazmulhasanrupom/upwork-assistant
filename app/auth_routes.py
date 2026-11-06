@@ -31,7 +31,8 @@ def _totp_page(request: Request, pending: dict, error: str = "", status: int = 2
         request,
         "setup_totp.html",
         status,
-        otpauth_url=auth.provisioning_uri(secret, pending["u"]),
+        otpauth_url=(url := auth.provisioning_uri(secret, pending["u"])),
+        qr_svg=auth.qr_svg(url),
         totp_secret=secret,
         error=error,
     )
@@ -83,6 +84,22 @@ def setup_submit(
         "s": crypto.encrypt(key, auth.new_totp_secret()),
     }
     auth.load_session(request).set("pending", pending)
+    return _redirect("/setup/admin/totp")
+
+
+@router.get("/setup/admin/totp")
+def setup_totp(request: Request):
+    """The authenticator step. Every load makes a NEW secret until the code is confirmed,
+    so a reloaded page never shows a key that was seen (and maybe leaked) before."""
+    if auth.admin_exists(request.app.state.db):
+        raise HTTPException(status_code=404)
+    session = auth.load_session(request)
+    pending = session.data.get("pending")
+    if not pending:
+        return _redirect("/setup/admin")
+    key = request.app.state.config.secret_key
+    pending = {**pending, "s": crypto.encrypt(key, auth.new_totp_secret())}
+    session.set("pending", pending)
     return _totp_page(request, pending)
 
 

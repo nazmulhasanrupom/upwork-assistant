@@ -110,6 +110,7 @@ F1. With the real login: run the daily task for real. Measure rate limits. Try `
 
 ## Phase G: Claude thinking and writing
 
+G0. Small fix: job detail "Budget" shows "300.0 (NOT_PROVIDED)" for a fixed job. Show "$300 fixed" or "$15–$35/hr (client range)"; hide hourly budget type on fixed jobs.
 G1. Prompts: `prompts/judge.md`, `prompts/write_proposal.md` (SPEC 7, 8.5, 3.4 proposal rules, style from `/data/context/style.md`). Stable text first.
 G2. Daily steps 8 to 10: batch 5 jobs per judge call, 3 per write call, fit minimum from settings. Save `judgements` and `drafts`. Never judge a job twice.
 G3. `app/mail.py` (SMTP, on/off per event, dedupe via `emails` table) and `app/tasks/digest.py`. Events in SPEC 11.

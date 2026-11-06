@@ -125,6 +125,10 @@ footer { text-align: center; color: var(--muted); padding: var(--s2) var(--s2) v
 .card-title { font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px; font-weight: 650; }
 .auth-card { padding: var(--s3); }
 .auth-card h1 { margin-bottom: var(--s1); }
+/* QR code: always black on white (the SVG has its own white quiet zone), also in dark mode */
+.qr { width: min(100%, 15rem); margin: var(--s2) auto; background: #fff; border-radius: var(--radius); border: 1px solid var(--border-strong); line-height: 0; }
+.qr svg { display: block; width: 100%; height: auto; }
+.qr-help { margin-bottom: 4px; }
 
 /* ---------- buttons ---------- */
 .btn {
