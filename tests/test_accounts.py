@@ -106,7 +106,7 @@ def test_page_has_button_login_help_and_no_oauth(web):
     assert "Test connection" in page and 'action="/upwork/test"' in page
     assert "How to log in" in page and "claude mcp add" in page and "/mcp" in page
     assert "No freelancer account is selected" in page and "no fetch yet" in page
-    assert "Connect Upwork" not in page and "/oauth/" not in page
+    assert "/oauth/" not in page  # "Connect Upwork" is now the pty login button (plan P5)
 
 
 def test_oauth_routes_are_gone(web):

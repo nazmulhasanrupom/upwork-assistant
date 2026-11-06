@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Fake `claude mcp login upwork --no-browser` for tests (plan P5). Needs a terminal, like the real one.
+
+Env FAKE_CLAUDE_MODE:
+  ok (default)   print the link (OSC-8 wrapped) and wait for one pasted line;
+                 exit 0 if it contains code=GOOD, else exit 1 with an error line
+  no_url         print an error and exit 1 without a link
+  hang           print the link, read the line, then never exit
+  hang_start     print nothing and never exit
+Env FAKE_CLAUDE_LOG: file that gets one JSON line (argv, CLAUDE_CONFIG_DIR, pid).
+"""
+
+import json
+import os
+import sys
+import time
+
+PORT = 41234
+STATE = "STATE123"
+AUTH = (
+    "https://www.upwork.com/ab/account-security/oauth2/authorize?response_type=code"
+    "&client_id=fake-client&code_challenge=abc&code_challenge_method=S256"
+    f"&redirect_uri=http%3A%2F%2Flocalhost%3A{PORT}%2Fcallback&state={STATE}"
+    "&resource=https%3A%2F%2Fmcp.upwork.com%2Fmcp"
+)
+
+mode = os.environ.get("FAKE_CLAUDE_MODE", "ok")
+log = os.environ.get("FAKE_CLAUDE_LOG")
+if log:
+    with open(log, "a") as f:
+        f.write(
+            json.dumps(
+                {
+                    "argv": sys.argv[1:],
+                    "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
+                    "pid": os.getpid(),
+                }
+            )
+            + "\n"
+        )
+
+if not sys.stdin.isatty():
+    print("Error: stdin isn't a terminal", file=sys.stderr)
+    sys.exit(1)
+if mode == "hang_start":
+    time.sleep(600)
+if mode == "no_url":
+    print("Error: server upwork not found", file=sys.stderr)
+    sys.exit(1)
+
+out = sys.stdout
+out.write('\x1b[2mStarting authentication for "upwork"…\x1b[0m\r\n')
+out.write("Visit this URL to authorize:\r\n")
+out.write(f"\x1b]8;;{AUTH}\x1b\\{AUTH}\x1b]8;;\x1b\\\r\n")
+out.write("\r\nWaiting for authorization… (^C to cancel)\r\n")
+out.write("Or paste the redirect URL here: ")
+out.flush()
+
+line = sys.stdin.readline()
+if mode == "hang":
+    time.sleep(600)
+if "code=GOOD" in line:
+    out.write("\r\nAuthentication successful\r\n")
+    out.flush()
+    sys.exit(0)
+out.write(
+    "\r\nError: authorization failed (access_token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEF)\r\n"
+)
+out.flush()
+sys.exit(1)

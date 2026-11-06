@@ -9,20 +9,59 @@
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 
-{% call card("Connection") %}
+{% call card("Upwork login") %}
+  <p class="login-status" id="login-status">
+    {% if test.status == "ok" %}{{ pill("Connected", "ok") }}
+      <span class="muted small">Last checked {{ test.at | dt }}</span>
+    {% elif test.status == "needs_login" %}{{ pill("Needs login", "warn") }}
+      <span class="muted small">Last checked {{ test.at | dt }}</span>
+    {% elif test.status == "failed" %}{{ pill("Last test failed", "warn") }}
+      <span class="muted small">Last checked {{ test.at | dt }}</span>
+    {% else %}{{ pill("Not checked yet") }}
+      <span class="muted small">Press Test connection to check.</span>{% endif %}
+  </p>
   <p>Upwork is reached through Claude Code. A small, cheap model ({{ model }}) makes read-only
     Upwork calls for this app and the app reads the raw answers. Nothing is changed on Upwork
     from this page.</p>
+
+  {% if login %}
+  <div class="login-flow" id="login-flow">
+    <h3 class="step-title">Step 1: Open Upwork login</h3>
+    <div class="actions">{{ button("Open Upwork login", "primary", href=login.url, external=true) }}</div>
+    <h3 class="step-title">Step 2: After you approve, your browser shows a page that does not
+      load (localhost). Copy the full address from the address bar and paste it here.</h3>
+    <form method="post" action="/upwork/login/finish" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="field"><span>Address from the browser
+        <span class="hint">starts with http://localhost:{{ login.port }}/callback</span></span>
+        <input type="text" name="pasted" required autocomplete="off" spellcheck="false"
+          placeholder="http://localhost:{{ login.port }}/callback?code=...&amp;state=..."></label>
+      <div class="actions">{{ button("Finish", "primary") }}</div>
+    </form>
+    <form method="post" action="/upwork/login/cancel" class="actions">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {{ button("Cancel", "secondary", small=true) }}
+      <span class="muted small">This login expires in about {{ login_minutes }} min.</span>
+    </form>
+  </div>
+  {% else %}
+  <div class="actions">
+    <form method="post" action="/upwork/login/start">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {{ button("Try again" if login_failed else "Connect Upwork", "primary") }}
+    </form>
+    <form method="post" action="/upwork/test">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {{ button("Test connection", "secondary") }}
+    </form>
+  </div>
+  {% endif %}
   <dl class="kv">
     <div><dt>Last fetch cost</dt><dd id="last-fetch">
       {% if fetch %}${{ "%.4f"|format(fetch.cost_usd) }}
         <span class="muted">({{ fetch.model }}, {{ fetch.created_at | dt }})</span>
       {% else %}<span class="muted">no fetch yet</span>{% endif %}</dd></div>
   </dl>
-  <form method="post" action="/upwork/test" class="actions">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Test connection", "primary") }}
-  </form>
 {% endcall %}
 
 {% call card("Freelancer account") %}
@@ -47,31 +86,34 @@
   {% endif %}
 {% endcall %}
 
-{% call card("How to log in") %}
-  <p>The Upwork login lives in Claude Code, inside this app's container. Do this once on your
-    own computer, and again if the login expires:</p>
-  <ol id="login-steps" class="steps">
-    <li>Install Claude Code, then run these commands in a terminal:
-      <pre class="text" id="login-commands">{{ login_commands }}</pre></li>
-    <li>In Claude, type <code>/mcp</code>, choose <code>upwork</code>, choose
-      <code>Authenticate</code>, and log in to Upwork in the browser. Then type
-      <code>/exit</code>.</li>
-    <li>Upload <code>$HOME/upwork-claude-test/.credentials.json</code> here, in the
-      "Import Claude login" box below.</li>
-    <li>Press <strong>Test connection</strong>.</li>
-  </ol>
-  <p class="muted small">That file holds a login token. After the import you can delete it from
-    your computer (and the <code>upwork-claude-test</code> folder) if you want.</p>
-{% endcall %}
+{% call card("") %}
+<details class="advanced" id="advanced-import">
+  <summary>Advanced: import a login file</summary>
+  <h3 class="step-title">How to log in from your own computer</h3>
+    <p>The Upwork login lives in Claude Code, inside this app's container. Do this once on your
+      own computer, and again if the login expires:</p>
+    <ol id="login-steps" class="steps">
+      <li>Install Claude Code, then run these commands in a terminal:
+        <pre class="text" id="login-commands">{{ login_commands }}</pre></li>
+      <li>In Claude, type <code>/mcp</code>, choose <code>upwork</code>, choose
+        <code>Authenticate</code>, and log in to Upwork in the browser. Then type
+        <code>/exit</code>.</li>
+      <li>Upload <code>$HOME/upwork-claude-test/.credentials.json</code> here, in the
+        "Import Claude login" box below.</li>
+      <li>Press <strong>Test connection</strong>.</li>
+    </ol>
+    <p class="muted small">That file holds a login token. After the import you can delete it from
+      your computer (and the <code>upwork-claude-test</code> folder) if you want.</p>
 
-{% call card("Import Claude login") %}
-  <p>Upload the login file you made on your own computer (steps above). The app keeps only the
-    Upwork part of it and stores it privately in the container. Max {{ max_upload_kb }} KB.</p>
-  <form method="post" action="/upwork/import" enctype="multipart/form-data" class="stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>File <code>.credentials.json</code>
-      <input type="file" name="file" accept=".json,application/json" required></label>
-    <div class="actions">{{ button("Import Claude login", "primary") }}</div>
-  </form>
+  <h3 class="step-title">Import Claude login</h3>
+    <p>Upload the login file you made on your own computer (steps above). The app keeps only the
+      Upwork part of it and stores it privately in the container. Max {{ max_upload_kb }} KB.</p>
+    <form method="post" action="/upwork/import" enctype="multipart/form-data" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>File <code>.credentials.json</code>
+        <input type="file" name="file" accept=".json,application/json" required></label>
+      <div class="actions">{{ button("Import Claude login", "primary") }}</div>
+    </form>
+</details>
 {% endcall %}
 {% endblock %}

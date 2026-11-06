@@ -79,6 +79,17 @@ def fake_claude_stream(tmp_path, monkeypatch):
     return _install_fake_claude(tmp_path, monkeypatch, "claude_stream")
 
 
+@pytest.fixture
+def fake_claude_login(tmp_path, monkeypatch):
+    """Fake `claude mcp login upwork --no-browser` (needs a pty). The session is killed after."""
+    from app.upwork import mcp_login
+
+    fake = _install_fake_claude(tmp_path, monkeypatch, "claude_mcp_login")
+    mcp_login.manager.cancel()
+    yield fake
+    mcp_login.manager.cancel()
+
+
 @pytest.fixture(autouse=True)
 def clean_claude_env(monkeypatch):
     """The image sets CLAUDE_CONFIG_DIR=/data/claude. Tests choose their own folder."""

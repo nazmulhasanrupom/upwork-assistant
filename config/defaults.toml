@@ -77,6 +77,9 @@ mcp_url = "https://mcp.upwork.com/mcp"
 talent_org_uid = ""             # the freelancer account's org_uid (from list_accounts), set in the wizard
 talent_name = ""                # display name of that account (from list_accounts)
 talent_candidates = []          # TALENT accounts waiting for the admin to pick one
+last_test_status = ""           # result of the last Test connection: ok | needs_login | failed ("" = never)
+last_test_at = ""               # when it ran (ISO time, UTC)
+last_test_message = ""          # short text shown on /upwork
 mcp_protocol_version = "2025-06-18"  # MCP Streamable HTTP; the server may answer with an older one
 mcp_timeout_seconds = 30
 mcp_max_tries = 3               # tries per request on 429, 5xx, or network errors

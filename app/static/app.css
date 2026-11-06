@@ -334,3 +334,14 @@ pre.text {
 .steps { margin: 0; padding-left: 1.25rem; }
 .steps li { margin-bottom: var(--s2); overflow-wrap: anywhere; }
 .steps li:last-child { margin-bottom: 0; }
+
+/* Upwork login flow and the collapsed import box */
+.login-status { display: flex; align-items: center; gap: var(--s1); flex-wrap: wrap; margin: 0 0 var(--s2); }
+.login-flow { margin: var(--s2) 0; padding: var(--s2); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.step-title { font-size: 1rem; margin: var(--s2) 0 0; }
+.step-title:first-child { margin-top: 0; }
+.login-flow .actions form { margin: 0; }
+details.advanced > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+details.advanced > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+details.advanced[open] > summary { margin-bottom: var(--s2); }
+details.advanced .step-title { margin-top: var(--s2); }
