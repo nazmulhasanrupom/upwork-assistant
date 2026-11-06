@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import badge, pill, chips, button, card, flash %}
+{% from "_macros.html" import badge, pill, chips, button, card, flash, copy_button %}
 {% block title %}{{ job.title or job.job_id }}{% endblock %}
 {% block content %}
 <p class="back"><a href="/jobs">&larr; Jobs</a></p>
@@ -22,9 +22,12 @@
 
     {% if judgement %}
     {% call card("Fit") %}
-    <p class="fit"><strong>Score {{ judgement.fit_score }}</strong></p>
-    {% if judgement.why_apply %}<p>{{ judgement.why_apply }}</p>{% endif %}
-    {% if judgement.risks %}<p class="muted">Risks: {{ judgement.risks }}</p>{% endif %}
+    <p class="fit"><strong>Score {{ judgement.fit_score }} / 100</strong></p>
+    {% if judgement.can_afford is false %}{{ flash("warn", "You can't afford this one yet: it costs " ~ judgement.plan_data.connects_cost ~ " Connects and you have " ~ judgement.plan_data.connects_balance ~ ".") }}{% endif %}
+    {% if judgement.why %}<h3 class="sub">Why apply</h3><ul class="plain-list">{% for r in judgement.why %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+    {% if judgement.risk_list %}<h3 class="sub">Risks</h3><ul class="plain-list">{% for r in judgement.risk_list %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+    {% if judgement.plan_data.proposal_plan %}<h3 class="sub">Plan</h3><p>{{ judgement.plan_data.proposal_plan }}</p>{% endif %}
+    {% if judgement.plan_data.instructions_in_post %}<h3 class="sub">Instructions in the post</h3><ul class="plain-list">{% for r in judgement.plan_data.instructions_in_post %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
     {% endcall %}
     {% endif %}
 
@@ -47,7 +50,24 @@
     {% endif %}
 
     {% call card("Draft") %}
-    <div class="placeholder">No draft yet. Drafts, Prepare and Approve come in a later phase.</div>
+    {% if draft %}
+    {% for f in draft.flag_list %}{{ flash("warn", f) }}{% endfor %}
+    <div class="draft-head"><h3 class="sub">Cover letter <small class="muted">({{ draft.length }} / 5000 characters)</small></h3>{{ copy_button("draft-cover") }}</div>
+    <pre class="text" id="draft-cover">{{ draft.cover_letter }}</pre>
+    {% for a in draft.answer_list %}
+    <div class="draft-head"><h3 class="sub">Answer {{ loop.index }}</h3>{{ copy_button("draft-answer-" ~ loop.index) }}</div>
+    {% if a.question %}<p class="muted">{{ a.question | untrusted }}</p>{% endif %}
+    <pre class="text" id="draft-answer-{{ loop.index }}">{{ a.answer }}</pre>
+    {% endfor %}
+    {% if draft.material_list %}<h3 class="sub">Materials to attach</h3><ul class="plain-list">{% for m in draft.material_list %}<li>{{ m }}</li>{% endfor %}</ul>{% endif %}
+    {% if draft.suggested_rate is not none %}
+    <div class="draft-head"><h3 class="sub">Suggested rate</h3>{{ copy_button("draft-rate") }}</div>
+    <p><strong id="draft-rate">{{ draft.suggested_rate | int if draft.suggested_rate == draft.suggested_rate | int else draft.suggested_rate }}</strong> <span class="muted">USD{% if job.job_type != "fixed" %} per hour{% endif %}</span></p>
+    {% endif %}
+    <p class="muted small">Made {{ draft.created_at | dt }}. Nothing is sent to Upwork from here.</p>
+    {% else %}
+    <div class="placeholder">{{ draft_note or "No draft yet." }}</div>
+    {% endif %}
     {% endcall %}
   </div>
 
@@ -55,8 +75,8 @@
     {% call card("Facts") %}
     <dl class="kv">
       <div><dt>Rate paid</dt><dd>{{ (job.rate_paid | rate) or "n/a" }}</dd></div>
-      <div><dt>Budget</dt><dd>{% if job.budget_min is not none %}{{ job.budget_min }}{% if job.budget_max != job.budget_min %} - {{ job.budget_max }}{% endif %}{% else %}n/a{% endif %}
-        {% if job.hourly_budget_type %}<small class="muted">({{ job.hourly_budget_type }})</small>{% endif %}</dd></div>
+      <div><dt>Budget</dt><dd>{{ job | budget }}
+        {% if job | budget_note %}<small class="muted">({{ job | budget_note }})</small>{% endif %}</dd></div>
       <div><dt>Type</dt><dd>{{ job.job_type or "n/a" }}</dd></div>
       <div><dt>Tier</dt><dd>{{ job.tier or "n/a" }}{% if job.tier_estimated %} (estimated){% endif %}</dd></div>
       <div><dt>Proposals</dt><dd>{{ job.proposals_tier or "n/a" }}</dd></div>

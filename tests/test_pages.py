@@ -189,3 +189,124 @@ def test_job_text_is_escaped_and_bad_links_ignored(web):
         assert "javascript:" not in r.text
     assert "&lt;b&gt;x&lt;/b&gt;" in client.get("/jobs/555").text
     assert 'href="https://www.upwork.com/jobs/~02555"' in client.get("/jobs/555").text
+
+
+# ---------------------------------------------------------------- plan G0: Budget row
+
+
+@pytest.mark.parametrize(
+    ("job", "text", "note"),
+    [
+        (
+            {
+                "job_type": "fixed",
+                "budget_min": 300.0,
+                "budget_max": 300.0,
+                "hourly_budget_type": "NOT_PROVIDED",
+            },
+            "$300 fixed",
+            "",
+        ),
+        ({"job_type": "fixed", "budget_min": 1250.5, "budget_max": 1250.5}, "$1,250.50 fixed", ""),
+        (
+            {
+                "job_type": "hourly",
+                "budget_min": 15.0,
+                "budget_max": 35.0,
+                "hourly_budget_type": "client-specified range",
+            },
+            "$15-$35/hr",
+            "client range",
+        ),
+        (
+            {
+                "job_type": "hourly",
+                "budget_min": 20.0,
+                "budget_max": 20.0,
+                "hourly_budget_type": "client-specified range",
+            },
+            "$20/hr",
+            "client range",
+        ),
+        (
+            {
+                "job_type": "hourly",
+                "budget_min": 8.0,
+                "budget_max": 20.0,
+                "hourly_budget_type": "platform default range",
+            },
+            "$8-$20/hr",
+            "platform default range, not the client's rate",
+        ),
+        ({"job_type": "hourly", "budget_min": None, "budget_max": None}, "n/a", ""),
+    ],
+)
+def test_budget_text(job, text, note):
+    from app.pages import budget_text
+
+    assert budget_text(job) == (text, note)
+
+
+def test_fixed_job_detail_has_no_hourly_type(web):
+    app, client = web
+    app.state.db.execute(
+        "INSERT INTO jobs(job_id, first_seen, title, status, tier, job_type, budget_min, "
+        "budget_max, hourly_budget_type, details) VALUES ('777', '2026-11-06T00:00:00+00:00', "
+        "'Fixed one', 'candidate', 'MID', 'fixed', 300, 300, 'NOT_PROVIDED', '{}')"
+    )
+    html = client.get("/jobs/777").text
+    assert "$300 fixed" in html
+    assert "NOT_PROVIDED" not in html and "300.0" not in html
+
+
+# ---------------------------------------------------------------- plan G2: fit and draft
+
+
+@pytest.mark.judging
+def test_job_pages_show_fit_and_draft(web, config, fake_claude_gen):
+    app, client = web
+    (config.data_dir / "memory").mkdir(parents=True, exist_ok=True)
+    (config.data_dir / "memory" / "USER.md").write_text("Built 12 n8n flows.")
+    fake_claude_gen.env("FAKE_GEN_SKIP", 1)
+    run(app, config, balance=10)
+
+    jobs = client.get("/jobs").text
+    assert "Fit 80" in jobs and "Draft ready" in jobs and "reason one" in jobs
+    assert "Can&#39;t afford" in jobs or "Can't afford" in jobs
+
+    jid = "2118527230669974661"  # HIGH, costs 12 Connects, balance 10
+    r = client.get(f"/jobs/{jid}")
+    assert r.status_code == 200
+    assert "Score 80 / 100" in r.text and "Why apply" in r.text and "reason two" in r.text
+    assert "vague scope" in r.text and "Instructions in the post" in r.text
+    assert "afford this one yet" in r.text and "costs 12 Connects and you have 10" in r.text
+    assert "Bots. Your CRM leaks leads" in r.text  # the cover letter
+    assert 'data-copy="#draft-cover"' in r.text and "/static/copy.js" in r.text
+    assert 'id="draft-answer-1"' in r.text  # the post has screening questions
+    assert "Skipped instruction" in r.text  # the flag is shown
+    assert "Portfolio item A" in r.text and "Nothing is sent to Upwork" in r.text
+    assert client.get("/static/copy.js").status_code == 200
+
+
+def test_job_without_draft_says_why(web, config):
+    app, client = web
+    run(app, config)  # judging is off in this test
+    r = client.get("/jobs/2118527230669974661")
+    assert "Not judged yet" in r.text
+    conn = app.state.db
+    conn.execute(
+        "INSERT INTO judgements(job_id, fit_score, why_apply, risks, plan) "
+        "VALUES ('2118527230669974661', 40, 'x', '', '{}')"
+    )
+    assert "fit 40 is below the minimum of 65" in client.get("/jobs/2118527230669974661").text
+    conn.execute("UPDATE judgements SET fit_score = 90")
+    assert "add your profile facts (USER.md)" in client.get("/jobs/2118527230669974661").text
+
+
+def test_dashboard_shows_user_md_alert(web):
+    app, client = web
+    app.state.db.execute(
+        "INSERT INTO alerts(key, message, created_at) VALUES ('user_md_missing', "
+        "'Add your profile facts (USER.md) to get drafts', '2026-11-06T00:00:00+00:00')"
+    )
+    assert "Add your profile facts (USER.md) to get drafts" in client.get("/").text

@@ -266,21 +266,26 @@ def run_claude(
     effort: str | None = None,
     run_id: str | None = None,
     timeout: int = 900,
+    prompt_text: str | None = None,
 ) -> dict[str, Any]:
     """Run one headless Claude call. Returns a dict:
 
     `output` (parsed output.json), `run_id`, `run_dir`, `model`, `input_tokens`,
     `output_tokens`, `cost_usd`, `num_turns`.
 
-    Raises BudgetCapReached (before any call), ClaudeRateLimited, ClaudeFailed.
+    `prompt_text` replaces the content of `prompt_file` (use `prompting.build_prompt`, so the
+    hard rules come first). Raises BudgetCapReached (before any call), ClaudeRateLimited,
+    ClaudeFailed.
     """
     settings = settings or Settings(conn)
     check_monthly_cap(conn, config, settings)
 
-    prompt_path = Path(prompt_file)
-    if not prompt_path.is_absolute():
-        prompt_path = APP_ROOT / prompt_path
-    prompt = prompt_path.read_text(encoding="utf-8") + RUN_FOOTER
+    if prompt_text is None:
+        prompt_path = Path(prompt_file)
+        if not prompt_path.is_absolute():
+            prompt_path = APP_ROOT / prompt_path
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+    prompt = prompt_text + RUN_FOOTER
 
     run_id = run_id or _new_run_id(task)
     run_dir = config.runs_dir / run_id

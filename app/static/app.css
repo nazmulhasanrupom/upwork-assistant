@@ -357,3 +357,10 @@ details.advanced .step-title { margin-top: var(--s2); }
 /* Email page (plan M1) */
 .copy-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin: var(--s2) 0; }
 .copy-row code { flex: 1 1 260px; min-width: 0; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); overflow-wrap: anywhere; }
+
+/* Drafts (plan G2) */
+.sub { margin: var(--s3) 0 var(--s1); font-size: 0.9375rem; font-weight: 600; }
+.sub:first-child { margin-top: 0; }
+.draft-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s3); }
+.draft-head .sub { margin: 0; }
+.draft-head + pre.text, .draft-head + p + pre.text { margin-top: var(--s1); }

@@ -41,6 +41,11 @@ class Config:
     def runs_dir(self) -> Path:
         return self.data_dir / "runs"
 
+    @property
+    def memory_dir(self) -> Path:
+        """Runtime memory files: USER.md, MEMORY.md, PLAYBOOK.md, DREAMS.md, daily/ (SPEC2 5.1)."""
+        return self.data_dir / "memory"
+
 
 def load_config(env: Mapping[str, str] | None = None) -> Config:
     env = os.environ if env is None else env

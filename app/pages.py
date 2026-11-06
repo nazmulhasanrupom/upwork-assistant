@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app.auth_routes import render
+from app.llm import prompting
 from app.tasks import lock, trigger
 from app.upwork.jobs import CLOSE_TAG, OPEN_TAG
 
@@ -68,6 +69,34 @@ def strip_untrusted(text: str | None) -> str:
     return str(text).replace(OPEN_TAG, "").replace(CLOSE_TAG, "").strip()
 
 
+def _amount(value: float) -> str:
+    return f"${value:,.0f}" if float(value).is_integer() else f"${value:,.2f}"
+
+
+def budget_text(job: dict[str, Any]) -> tuple[str, str]:
+    """(main text, small note) for the Budget row on the job page (plan G0).
+
+    Fixed job: "$300 fixed", no note. Hourly job: "$15-$35/hr" plus a note about where the
+    range comes from (the client, or Upwork's default range, which is not the client's rate).
+    """
+    lo, hi = job.get("budget_min"), job.get("budget_max")
+    if lo is None and hi is None:
+        return "n/a", ""
+    lo = hi if lo is None else lo
+    hi = lo if hi is None else hi
+    if str(job.get("job_type") or "").lower() == "fixed":
+        return f"{_amount(lo)} fixed", ""  # the hourly budget type means nothing here
+    text = _amount(lo) if lo == hi else f"{_amount(lo)}-{_amount(hi)}"
+    kind = str(job.get("hourly_budget_type") or "").strip().lower()
+    if kind.startswith("platform default"):
+        note = "platform default range, not the client's rate"
+    elif kind.startswith("client"):
+        note = "client range"
+    else:
+        note = kind
+    return f"{text}/hr", note
+
+
 def upwork_link(url: str | None, job_id: str | None) -> str | None:
     if isinstance(url, str) and url.startswith(UPWORK_PREFIX):
         return url
@@ -82,6 +111,8 @@ def install_filters(templates: Any, tz_name: str) -> None:
     env.filters["money"] = fmt_money
     env.filters["rate"] = fmt_rate
     env.filters["untrusted"] = strip_untrusted
+    env.filters["budget"] = lambda job: budget_text(job)[0]
+    env.filters["budget_note"] = lambda job: budget_text(job)[1]
 
 
 def _tz(request: Request) -> tzinfo:
@@ -279,12 +310,22 @@ def jobs_list(
     pages = max(1, -(-total // size))
     page = min(max(1, page), pages)
     rows = conn.execute(
-        f"SELECT j.*, g.fit_score, g.why_apply FROM jobs j "
+        f"SELECT j.*, g.fit_score, g.why_apply, g.plan AS plan_json, "
+        f"EXISTS (SELECT 1 FROM drafts d WHERE d.job_id = j.job_id) AS has_draft FROM jobs j "
         f"LEFT JOIN judgements g ON g.job_id = j.job_id {clause} "
         f"ORDER BY j.first_seen DESC, j.rate_paid DESC LIMIT ? OFFSET ?",
         [*args, size, (page - 1) * size],
     ).fetchall()
-    cards = [{**dict(r), "flags": _json(r["red_flags"], [])} for r in rows]
+    cards = []
+    for r in rows:
+        plan = _json(r["plan_json"], {})
+        cards.append(
+            {
+                **dict(r),
+                "flags": _json(r["red_flags"], []),
+                "can_afford": plan.get("can_afford") if isinstance(plan, dict) else None,
+            }
+        )
 
     def page_url(n: int) -> str:
         q = {"tier": tier, "status": status, "date_from": date_from, "date_to": date_to}
@@ -320,15 +361,73 @@ def job_detail(request: Request, job_id: str) -> Response:
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
     judgement = conn.execute("SELECT * FROM judgements WHERE job_id = ?", (job_id,)).fetchone()
+    draft = conn.execute(
+        "SELECT * FROM drafts WHERE job_id = ? ORDER BY id DESC LIMIT 1", (job_id,)
+    ).fetchone()
     details = _json(row["details"], {})
     if not isinstance(details, dict):
         details = {}
+    fit_min = int(request.app.state.settings.get("pay.fit_min"))
     return render(
         request,
         "job_detail.html",
         job=dict(row),
         flags=_json(row["red_flags"], []),
         details=details,
-        judgement=dict(judgement) if judgement else None,
+        judgement=judgement_view(judgement),
+        draft=draft_view(draft),
+        draft_note=draft_note(request, row, judgement, draft, fit_min),
         link=upwork_link(row["url"], row["job_id"]),
     )
+
+
+def _lines(value: str | None) -> list[str]:
+    return [x for x in (value or "").splitlines() if x.strip()]
+
+
+def judgement_view(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    """A judgement with its text fields split into lists, for the templates."""
+    if row is None:
+        return None
+    plan = _json(row["plan"], {})
+    plan = plan if isinstance(plan, dict) else {}
+    return {
+        **dict(row),
+        "why": _lines(row["why_apply"]),
+        "risk_list": _lines(row["risks"]),
+        "plan_data": plan,
+        "can_afford": plan.get("can_afford"),
+    }
+
+
+def draft_view(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        **dict(row),
+        "answer_list": _json(row["answers"], []),
+        "material_list": _json(row["materials"], []),
+        "flag_list": _json(row["flags"], []),
+        "length": len(row["cover_letter"] or ""),
+    }
+
+
+def draft_note(
+    request: Request,
+    job: sqlite3.Row,
+    judgement: sqlite3.Row | None,
+    draft: sqlite3.Row | None,
+    fit_min: int,
+) -> str:
+    """Why there is no draft (shown in the empty Draft card)."""
+    if draft is not None:
+        return ""
+    if judgement is None:
+        if job["status"] == "dropped":
+            return "This job was dropped, so it is not judged or drafted."
+        return "Not judged yet. Claude judges new MID and HIGH jobs on the next run."
+    if judgement["fit_score"] is not None and judgement["fit_score"] < fit_min:
+        return f"No draft: fit {judgement['fit_score']} is below the minimum of {fit_min}."
+    if not prompting.user_facts(request.app.state.config):
+        return "No draft yet: add your profile facts (USER.md) so Claude can write for you."
+    return "The draft is made on the next run."

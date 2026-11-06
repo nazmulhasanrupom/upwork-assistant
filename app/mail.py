@@ -275,18 +275,32 @@ def _rate(v: Any) -> str:
     return f"${v:,.2f}/hr" if isinstance(v, (int, float)) else "n/a"
 
 
-def notify_high_job(conn, config: Config, job: dict[str, Any], **kw) -> str:
+def notify_high_job(
+    conn, config: Config, job: dict[str, Any], judgement: dict[str, Any] | None = None, **kw
+) -> str:
+    """HIGH job email. `judgement` (plan G2) adds fit score, why apply, and a Connects note."""
     title = _clean(job.get("title") or job.get("id"))
     flags = [_clean(f) for f in (job.get("flags") or [])]
     facts = [
         ("Tier", f"{job.get('tier')}" + (" (estimated)" if job.get("tier_estimated") else "")),
+    ]
+    lines = [title]
+    if judgement:
+        facts.append(("Fit score", f"{judgement.get('fit_score')} / 100"))
+        lines += [f"Why apply: {_clean(r)}" for r in judgement.get("why_apply") or []]
+    facts += [
         ("Rate paid", _rate(job.get("rate_paid"))),
         ("Client spend", _money(job.get("client_spend"))),
         ("Flags", ", ".join(flags) if flags else "none"),
     ]
+    if judgement and judgement.get("can_afford") is False:
+        lines.append(
+            f"You can't afford this one yet: it costs {judgement.get('connects_cost')} Connects"
+            f" and you have {judgement.get('connects_balance')}."
+        )
     text, html = build_email(
         "New HIGH job",
-        [title],
+        lines,
         facts=facts,
         link_path=f"/jobs/{job['id']}",
         base_url=config.public_base_url,

@@ -71,6 +71,7 @@ write_max_budget_usd = 0.50
 monthly_cap_usd = 50.0
 max_jobs_per_think_call = 5
 max_proposals_per_write_call = 3
+retry_hours = 48                # jobs still waiting for a judgement or a draft are retried for this long
 fetch_max_budget_usd = 0.25     # cap for one Upwork fetch run (plan P1)
 fetch_batch_size = 8            # Upwork tool calls per claude run
 fetch_timeout_seconds = 300

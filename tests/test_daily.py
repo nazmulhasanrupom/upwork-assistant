@@ -6,6 +6,7 @@ import json
 import pytest
 
 from app.db import init_db
+from app.llm.judging import JudgeResult
 from app.settings import Settings
 from app.tasks import daily
 from app.upwork.client import CallBudgetExceeded, UpworkAuthError, UpworkToolError
@@ -123,16 +124,16 @@ def test_run_row_and_call_count(conn, settings, config):
 
 def test_second_run_sees_nothing_new(conn, settings, config, monkeypatch):
     seen_hooks = []
-    monkeypatch.setattr(daily, "judge_and_draft", lambda c, cands: seen_hooks.append(len(cands)))
+    monkeypatch.setattr(
+        daily,
+        "judge_and_draft",
+        lambda c, cands, **k: seen_hooks.append(len(cands)) or JudgeResult(),
+    )
     daily.run_daily(conn, settings, config, make_client(settings))
     res = daily.run_daily(conn, settings, config, make_client(settings))
     assert (res.status, res.seen, res.kept) == ("ok", 0, 0)
-    assert seen_hooks == [5]  # hook ran once, with the five kept jobs; not on the empty run
+    assert seen_hooks == [5, 0]  # second run: no new jobs, the hook only retries old ones
     assert conn.execute("SELECT COUNT(*) FROM runs WHERE task='daily'").fetchone()[0] == 2
-
-
-def test_hook_does_nothing(conn):
-    assert daily.judge_and_draft(conn, [{"id": "1"}]) is None
 
 
 def test_connects_low_alert_and_clear(conn, settings, config):
@@ -152,7 +153,7 @@ def test_connects_low_alert_and_clear(conn, settings, config):
 def test_note_is_written_and_appended(conn, settings, config):
     daily.run_daily(conn, settings, config, make_client(settings, balance=5))
     daily.run_daily(conn, settings, config, make_client(settings, balance=5))
-    files = list((config.data_dir / "notes" / "daily").glob("*.md"))
+    files = list((config.data_dir / "memory" / "daily").glob("*.md"))
     assert len(files) == 1 and len(files[0].stem) == 10  # YYYY-MM-DD
     text = files[0].read_text()
     assert text.count("daily run") == 2
@@ -166,7 +167,7 @@ def test_note_is_written_and_appended(conn, settings, config):
 def test_top_skills_limited_by_setting(conn, settings, config):
     settings.set("daily.top_skills", 1)
     daily.run_daily(conn, settings, config, make_client(settings))
-    text = next((config.data_dir / "notes" / "daily").glob("*.md")).read_text()
+    text = next((config.data_dir / "memory" / "daily").glob("*.md")).read_text()
     line = next(x for x in text.splitlines() if x.startswith("- Top skills seen:"))
     assert line.count("(") == 1
 
@@ -188,7 +189,7 @@ def test_auth_expired(conn, settings, config):
     assert res.status == "auth_expired"
     row = conn.execute("SELECT status, error, ended FROM runs").fetchone()
     assert row["status"] == "auth_expired" and "login" in row["error"] and row["ended"]
-    assert "auth_expired" in next((config.data_dir / "notes" / "daily").glob("*.md")).read_text()
+    assert "auth_expired" in next((config.data_dir / "memory" / "daily").glob("*.md")).read_text()
 
 
 def test_not_logged_in_is_auth_expired(conn, settings, config, fake_claude_stream):
@@ -220,7 +221,7 @@ def test_tool_error_on_one_detail_skips_that_job(conn, settings, config):
     res = daily.run_daily(conn, settings, config, client)
     assert res.status == "ok" and res.kept == 4
     assert "2118413555956864697" not in rows(conn)  # retried next run
-    text = next((config.data_dir / "notes" / "daily").glob("*.md")).read_text()
+    text = next((config.data_dir / "memory" / "daily").glob("*.md")).read_text()
     assert "tool error on job 2118413555956864697" in text
 
 
@@ -236,13 +237,15 @@ def test_call_limit_leaves_jobs_for_next_run(conn, settings, config):
     assert len(names) == 7
     assert (
         "MCP call limit reached"
-        in next((config.data_dir / "notes" / "daily").glob("*.md")).read_text()
+        in next((config.data_dir / "memory" / "daily").glob("*.md")).read_text()
     )
 
 
 def test_candidates_passed_to_hook(conn, settings, config, monkeypatch):
     got = []
-    monkeypatch.setattr(daily, "judge_and_draft", lambda c, cands: got.extend(cands))
+    monkeypatch.setattr(
+        daily, "judge_and_draft", lambda c, cands, **k: got.extend(cands) or JudgeResult()
+    )
     daily.run_daily(conn, settings, config, make_client(settings))
     assert [c["tier"] for c in got] == ["HIGH", "HIGH", "MID", "MID", "MID"]
     assert got[0]["id"] == "2118527230669974661"

@@ -80,6 +80,12 @@ def fake_claude_stream(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def fake_claude_gen(tmp_path, monkeypatch):
+    """Fake `claude` for judge and write calls (see tests/fakes/claude_gen)."""
+    return _install_fake_claude(tmp_path, monkeypatch, "claude_gen")
+
+
+@pytest.fixture
 def fake_claude_login(tmp_path, monkeypatch):
     """Fake `claude mcp login upwork --no-browser` (needs a pty). The session is killed after."""
     from app.upwork import mcp_login
@@ -95,3 +101,15 @@ def clean_claude_env(monkeypatch):
     """The image sets CLAUDE_CONFIG_DIR=/data/claude. Tests choose their own folder."""
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("UPWORK_MCP_URL", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_judging_in_daily(request, monkeypatch):
+    """The daily task's judge/write step (plan G2) is off in tests that are about something
+    else. Tests marked `@pytest.mark.judging` run the real step (with a fake claude)."""
+    if request.node.get_closest_marker("judging"):
+        return
+    from app.llm.judging import JudgeResult
+    from app.tasks import daily
+
+    monkeypatch.setattr(daily, "judge_and_draft", lambda *a, **k: JudgeResult())

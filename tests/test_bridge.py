@@ -434,5 +434,5 @@ def test_daily_survives_one_skipped_detail(
     res = daily.run_daily(conn, settings, config)
     assert res.status == "ok", res.error
     assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 7  # one job left for later
-    note = next((config.data_dir / "notes" / "daily").glob("*.md")).read_text()
+    note = next((config.data_dir / "memory" / "daily").glob("*.md")).read_text()
     assert "tool error on job" in note and "did not make this call" in note

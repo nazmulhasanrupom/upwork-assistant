@@ -273,8 +273,15 @@ def subjects(route):
     return out
 
 
+@pytest.fixture
+def user_md(config):
+    (config.data_dir / "memory").mkdir(exist_ok=True)
+    (config.data_dir / "memory" / "USER.md").write_text("Built 12 n8n flows for a CRM client.")
+
+
+@pytest.mark.judging
 def test_daily_sends_one_email_per_new_high_job_even_in_dry_run(
-    conn, config, settings, gmail_route
+    conn, config, settings, gmail_route, fake_claude_gen, user_md
 ):
     assert settings.get("general.dry_run") is True
     res = daily.run_daily(conn, settings, config, make_client(settings, balance=50))
@@ -283,9 +290,38 @@ def test_daily_sends_one_email_per_new_high_job_even_in_dry_run(
     assert len(msgs) == 2 and count(conn, "high_job") == 2
     html = msgs[0].get_body(("html",)).get_content()
     assert "/jobs/" in html and "Rate paid" in html and "Client spend" in html and "Flags" in html
+    assert "Fit score" in html and "80 / 100" in html and "Why apply" in html
+    assert "reason two" in html and "can&#x27;t afford" not in html
     # second run: nothing new, nothing sent
     daily.run_daily(conn, settings, config, make_client(settings, balance=50))
     assert len(subjects(gmail_route)) == 2
+
+
+@pytest.mark.judging
+def test_high_job_email_only_when_fit_is_high_enough(
+    conn, config, settings, gmail_route, fake_claude_gen, user_md
+):
+    fake_claude_gen.env(
+        "FAKE_GEN_FIT", json.dumps({"2118527230669974661": 64, "2118387252193629626": 65})
+    )
+    daily.run_daily(conn, settings, config, make_client(settings, balance=50))
+    msgs = subjects(gmail_route)
+    assert len(msgs) == 1 and count(conn, "high_job") == 1
+    assert "65 / 100" in msgs[0].get_body(("plain",)).get_content()
+    settings.set("pay.fit_min", 66)  # a later threshold change does not email old judgements
+    daily.run_daily(conn, settings, config, make_client(settings, balance=50))
+    assert len(subjects(gmail_route)) == 1
+
+
+@pytest.mark.judging
+def test_high_job_email_says_when_you_cannot_afford_it(
+    conn, config, settings, gmail_route, fake_claude_gen, user_md
+):
+    daily.run_daily(conn, settings, config, make_client(settings, balance=10))
+    msgs = [m for m in subjects(gmail_route) if "HIGH job" in m["Subject"]]
+    assert len(msgs) == 2
+    text = msgs[0].get_body(("plain",)).get_content()
+    assert "can't afford this one yet" in text and "Connects" in text and "you have 10" in text
 
 
 def test_daily_connects_low_email_once(conn, config, settings, gmail_route):
@@ -332,7 +368,10 @@ def test_daily_failed_runs_reset_by_success(conn, config, settings, gmail_route,
     assert count(conn, "run_failed") == 0
 
 
-def test_daily_mail_failure_does_not_break_the_run(conn, config, settings):
+@pytest.mark.judging
+def test_daily_mail_failure_does_not_break_the_run(
+    conn, config, settings, fake_claude_gen, user_md
+):
     connect_gmail(config, settings, conn)
     with respx.mock:
         respx.post(SEND_URL).mock(return_value=httpx.Response(500, json={}))

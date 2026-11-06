@@ -9,6 +9,7 @@ Steps 8 to 10 (judge and draft with Claude) are a hook: `judge_and_draft`.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import sys
@@ -19,11 +20,13 @@ from datetime import UTC, datetime, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from app import mail
+from app import mail, notes
 from app.config import Config, load_config
 from app.db import init_db
 from app.filters.flags import flags as red_flags
 from app.filters.tiers import prefilter, tier
+from app.llm import judging
+from app.llm.judging import JudgeResult
 from app.settings import Settings
 from app.tasks.lock import TaskBusy, task_lock
 from app.upwork import accounts
@@ -49,6 +52,8 @@ class DailyResult:
     seen: int = 0
     kept: int = 0
     dropped: int = 0
+    judged: int = 0
+    drafted: int = 0
     tiers: dict[str, int] = field(default_factory=dict)
     error: str | None = None
 
@@ -96,13 +101,19 @@ def _rank(job: dict[str, Any]) -> tuple[int, float]:
 # ---------------------------------------------------------------- hook for Phase G
 
 
-def judge_and_draft(conn: sqlite3.Connection, candidates: list[dict[str, Any]]) -> None:
-    """Steps 8 to 10 of SPEC 6.2 (Opus judges, Sonnet drafts). Not built yet: does nothing.
-
-    `candidates` are the new MID/HIGH jobs of this run: the cut-down job dict plus the keys
-    `tier`, `tier_estimated`, `rate_paid`, `flags`, `status`.
-    """
-    return None
+def judge_and_draft(
+    conn: sqlite3.Connection,
+    candidates: list[dict[str, Any]],
+    *,
+    settings: Settings | None = None,
+    config: Config | None = None,
+    run_id: str | None = None,
+) -> JudgeResult:
+    """Steps 8 to 10 of SPEC 6.2 (thinking model judges, writing model drafts): see
+    `app/llm/judging.py`. `candidates` are the new MID/HIGH jobs of this run."""
+    return judging.judge_and_draft(
+        conn, candidates, settings=settings, config=config, run_id=run_id
+    )
 
 
 # ---------------------------------------------------------------- connects
@@ -172,6 +183,7 @@ def _note_block(
         f"- Status: {result.status}",
         f"- New jobs seen: {result.seen}",
         f"- Kept (MID/HIGH): {result.kept} ({tiers}); dropped: {result.dropped}",
+        f"- Judged: {result.judged}; drafts written: {result.drafted}",
         f"- Top skills seen: {top}",
     ]
     if balance is not None:
@@ -183,13 +195,8 @@ def _note_block(
 
 
 def write_note(config: Config, now_local: datetime, block: str) -> None:
-    path = config.data_dir / "notes" / "daily" / f"{now_local.strftime('%Y-%m-%d')}.md"
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(block)
-    except OSError:
-        log.exception("Could not write the daily note")
+    """Append to memory/daily/YYYY-MM-DD.md (old notes/daily files are only read, see notes.py)."""
+    notes.append_note(config, now_local.strftime("%Y-%m-%d"), block)
 
 
 # ---------------------------------------------------------------- the run
@@ -204,6 +211,20 @@ def ensure_talent_account(client: Any, settings: Settings) -> None:
         extra = " Open the Upwork page and pick one." if res.status == "choose" else ""
         raise accounts.AccountError(res.message + extra)
     log.info("Freelancer account detected automatically")
+
+
+def _email_job(conn: sqlite3.Connection, job_id: str) -> dict[str, Any]:
+    """Job facts for the high_job email, from the saved row."""
+    row = conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+    return {
+        "id": row["job_id"],
+        "title": row["title"],
+        "tier": row["tier"],
+        "tier_estimated": bool(row["tier_estimated"]),
+        "rate_paid": row["rate_paid"],
+        "client_spend": row["client_spend"],
+        "flags": json.loads(row["red_flags"] or "[]"),
+    }
 
 
 def _process(
@@ -311,12 +332,21 @@ def _process(
             now=now,
         )
 
-    for job in kept:  # emails are not Upwork writes: sent in dry-run too
-        if job.get("tier") == "HIGH":
-            mail.notify_high_job(conn, config, job, settings=settings, now=now)
-
-    if kept:  # step 7: nothing new and good means no Claude
-        judge_and_draft(conn, kept)
+    # Steps 8 to 10. Also retries jobs an earlier run could not finish (cap, limit, no USER.md).
+    judged = judge_and_draft(conn, kept, settings=settings, config=config, run_id=run_id)
+    oddities.extend(judged.notes)
+    result.judged, result.drafted = len(judged.judged), judged.drafted
+    fit_min = int(settings.get("pay.fit_min"))
+    for item in judged.judged:  # emails are not Upwork writes: sent in dry-run too
+        if item["tier"] == "HIGH" and item["fit_score"] >= fit_min:
+            mail.notify_high_job(
+                conn,
+                config,
+                _email_job(conn, item["job_id"]),
+                judgement=item,
+                settings=settings,
+                now=now,
+            )
     return balance
 
 

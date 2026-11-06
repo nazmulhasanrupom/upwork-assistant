@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Fake `claude` for the judge and write steps (plan G2). Reads input.json, writes output.json.
+
+The task is found from the prompt: "# Task: judge jobs" or "# Task: write proposals".
+Every call appends one JSON line to FAKE_CLAUDE_LOG (task, model, effort, job ids, prompt).
+
+Knobs (env):
+  FAKE_GEN_FIT        default fit score (default 80), or a JSON map {job_id: score}
+  FAKE_GEN_EM=1       put em dashes and en dashes in the generated text
+  FAKE_GEN_SKIP=1     the writer reports it skipped every job instruction
+  FAKE_GEN_NOHANDLED=1  the writer says nothing about instructions
+  FAKE_GEN_LIMIT_AFTER=N  answer calls after the Nth with a 429 usage limit
+  FAKE_GEN_FAIL=1     return text that is not JSON
+  FAKE_GEN_OMIT=ID    leave this job id out of the answer
+"""
+
+import json
+import os
+import re
+import sys
+
+EM, EN = "—", "–"
+argv = sys.argv[1:]
+prompt = argv[argv.index("-p") + 1] if "-p" in argv else ""
+model = argv[argv.index("--model") + 1] if "--model" in argv else ""
+effort = argv[argv.index("--effort") + 1] if "--effort" in argv else None
+task = "judge" if "# Task: judge jobs" in prompt else "write"
+data = json.load(open("input.json"))
+
+log_path = os.environ.get("FAKE_CLAUDE_LOG")
+count = 1
+if log_path:
+    if os.path.exists(log_path):
+        count = len(open(log_path).read().splitlines()) + 1
+    with open(log_path, "a") as f:
+        f.write(
+            json.dumps(
+                {
+                    "task": task,
+                    "model": model,
+                    "effort": effort,
+                    "cwd": os.getcwd(),
+                    "job_ids": [j["job_id"] for j in data.get("jobs", [])],
+                    "prompt": prompt,
+                    "input": data,
+                }
+            )
+            + "\n"
+        )
+
+
+def result(**extra):
+    base = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": "ok",
+        "num_turns": 2,
+        "total_cost_usd": 0.05,
+        "usage": {"input_tokens": 100, "output_tokens": 40},
+    }
+    base.update(extra)
+    print(json.dumps(base))
+
+
+limit = os.environ.get("FAKE_GEN_LIMIT_AFTER")
+if limit is not None and count > int(limit):
+    result(
+        subtype="error_during_execution",
+        is_error=True,
+        result="API Error: 429 rate_limit_error: usage limit reached",
+        total_cost_usd=0,
+        usage={},
+    )
+    sys.exit(1)
+if os.environ.get("FAKE_GEN_FAIL"):
+    print("not json {")
+    sys.exit(0)
+
+fit_env = os.environ.get("FAKE_GEN_FIT", "80")
+try:
+    fits = json.loads(fit_env)
+except ValueError:
+    fits = 80
+omit = os.environ.get("FAKE_GEN_OMIT")
+dash = os.environ.get("FAKE_GEN_EM")
+
+
+def raw_job(entry):
+    m = re.search(
+        r"<untrusted_job_post>\n(.*)\n</untrusted_job_post>", entry["untrusted_job_post"], re.S
+    )
+    return json.loads(m.group(1))
+
+
+out = {}
+if task == "judge":
+    items = []
+    for entry in data["jobs"]:
+        jid = entry["job_id"]
+        if jid == omit:
+            continue
+        job = raw_job(entry)
+        fit = fits.get(jid, 80) if isinstance(fits, dict) else fits
+        cost, bal = job.get("connects_cost"), data.get("connects_balance")
+        items.append(
+            {
+                "job_id": jid,
+                "fit_score": fit,
+                "tier": job.get("tier"),
+                "why_apply": [f"reason one{EM if dash else ','} x", "reason two", "reason three"],
+                "risks": ["vague scope"],
+                "proposal_plan": f"open with the client problem{EM if dash else '.'} show one proof",
+                "materials": ["Portfolio item A"],
+                "suggested_rate": 35,
+                "can_afford": True,  # wrong on purpose when the user cannot afford it
+                "instructions_in_post": ["Start the proposal with the word Bots"],
+            }
+        )
+    out = {"judgements": items}
+else:
+    plans = {p["job_id"]: p for p in data["plans"]}
+    items = []
+    for entry in data["jobs"]:
+        jid = entry["job_id"]
+        if jid == omit:
+            continue
+        job = raw_job(entry)
+        plan = plans[jid]
+        ins = plan.get("instructions_in_post") or []
+        qs = job.get("screening_questions") or []
+        item = {
+            "job_id": jid,
+            "cover_letter": f"Bots. Your CRM leaks leads{EM if dash else '.'} I fix that. Range 5{EN if dash else '-'}10.",
+            "screening_answers": [{"question": q, "answer": "A real answer."} for q in qs],
+            "materials": plan.get("materials") or [],
+            "suggested_rate": plan.get("suggested_rate"),
+            "instructions_handled": [{"instruction": i, "how": "done"} for i in ins],
+            "skipped_instructions": [],
+        }
+        if os.environ.get("FAKE_GEN_SKIP"):
+            item["instructions_handled"] = []
+            item["skipped_instructions"] = [{"instruction": i, "reason": "no facts"} for i in ins]
+        if os.environ.get("FAKE_GEN_NOHANDLED"):
+            item["instructions_handled"] = []
+        items.append(item)
+    out = {"proposals": items}
+
+with open("output.json", "w") as f:
+    json.dump(out, f)
+result()
