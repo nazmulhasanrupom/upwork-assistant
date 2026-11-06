@@ -35,9 +35,12 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 PUBLIC_PATHS = {
     "/healthz",
     "/login",
+    "/setup",
+    "/setup/account",
+    "/setup/totp",
+    "/setup/confirm",
     "/setup/admin",
     "/setup/admin/totp",
-    "/setup/admin/confirm",
     "/gmail/callback",
 }
 ISSUER = "Upwork Assistant"
@@ -335,5 +338,5 @@ async def guard(request: Request) -> None:
     if current_user(request) is None:
         if request.headers.get("hx-request"):
             raise HTTPException(status_code=401, headers={"HX-Redirect": "/login"})
-        target = "/login" if admin_exists(request.app.state.db) else "/setup/admin"
+        target = "/login" if admin_exists(request.app.state.db) else "/setup"
         raise HTTPException(status_code=303, headers={"Location": target})

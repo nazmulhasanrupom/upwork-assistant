@@ -12,13 +12,13 @@
 {% if counts.over %}{{ flash("warn", "USER.md and MEMORY.md together are " ~ counts.total ~ " characters, over the " ~ counts.cap ~ " character cap. Shorten them so every run stays cheap and focused.") }}{% endif %}
 {% if not current_chars and not proposed %}{{ flash("warn", "USER.md is empty. Drafts need your profile facts. Press Build from Upwork, or write it yourself.") }}{% endif %}
 
-{% call card("Build from Upwork") %}
+{% call card("Rebuild from Upwork" if current_chars else "Build from Upwork") %}
   <p>Reads your Upwork profile (and portfolio highlights if available) and asks Claude for a short
     USER.md with facts only. You see it next to the current one first. Nothing is saved until you
-    click <strong>Use this</strong>. It costs a few cents.</p>
+    click <strong>Use this</strong> (it then goes through the size cap, the noise check and the saved history). It costs a few cents.</p>
   <form method="post" action="/context/build" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("Build from Upwork", "secondary") }}
+    {{ button("Rebuild from Upwork" if current_chars else "Build from Upwork", "secondary") }}
   </form>
 {% endcall %}
 

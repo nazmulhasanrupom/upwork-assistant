@@ -161,3 +161,12 @@ def no_rank_in_daily(request, monkeypatch):
     from app.tasks import daily
 
     monkeypatch.setattr(daily, "rank_part", lambda *a, **k: [])
+
+
+@pytest.fixture
+def gate_open():
+    """The noise gate open (plan L4), for tests that write MEMORY.md or skills directly."""
+    from app import noise_gate
+
+    with noise_gate.open_gate("consolidation"):
+        yield

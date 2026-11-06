@@ -29,8 +29,13 @@
         {{ nav_link("/context", "Profile", path.startswith("/context")) }}
         {{ nav_link("/profile/versions", "Profile history", path.startswith("/profile")) }}
         {{ nav_link("/playbook", "Playbook", path.startswith("/playbook")) }}
+        {{ nav_link("/trends", "Trends", path.startswith("/trends")) }}
+        {{ nav_link("/reports", "Reports", path.startswith("/reports")) }}
+        {{ nav_link("/learning", "Learning", path.startswith("/learning")) }}
         {{ nav_link("/upwork", "Upwork", path.startswith("/upwork")) }}
-        {{ nav_link("/settings/email", "Email", path.startswith("/settings")) }}
+        {{ nav_link("/setup", "Setup", path.startswith("/setup")) }}
+        {{ nav_link("/settings", "Settings", path == "/settings" or (path.startswith("/settings/") and not path.startswith("/settings/email"))) }}
+        {{ nav_link("/settings/email", "Email", path.startswith("/settings/email")) }}
       </nav>
       <form method="post" action="/logout" class="inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

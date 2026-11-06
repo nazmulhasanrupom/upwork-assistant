@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from app import approvals, mail, playbook, rank
+from app import approvals, mail, playbook, rank, skills
 from app import profile_versions as pv
 from app.config import Config
 from app.llm import prompting
@@ -186,7 +186,9 @@ def top_profiles(bridge: Any, conn: sqlite3.Connection, settings: Settings) -> d
 # ---------------------------------------------------------------- Claude: pick
 
 
-def _claude(task, prompt, data, model_key, turns, budget, timeout, conn, config, settings, run_id):
+def _claude(
+    task, prompt, data, model_key, turns, budget, timeout, conn, config, settings, run_id, extra=""
+):
     try:
         return run_claude(
             task,
@@ -203,7 +205,7 @@ def _claude(task, prompt, data, model_key, turns, budget, timeout, conn, config,
             )
             or None,
             timeout=int(settings.get(timeout)),
-            prompt_text=prompting.build_prompt(prompt, config=config),
+            prompt_text=prompting.build_prompt(prompt, extra, config=config),
             record_run_id=run_id,
         )
     except ClaudeFailed as e:
@@ -354,7 +356,8 @@ def draft_change(conn, config, settings, pick, current_fields, top, run_id) -> t
     }
     res = _claude(DRAFT_TASK, DRAFT_PROMPT, data, "models.write", "profile_loop.draft_max_turns",
                   "profile_loop.draft_max_budget_usd", "profile_loop.draft_timeout_seconds",
-                  conn, config, settings, run_id)  # fmt: skip
+                  conn, config, settings, run_id,
+                  skills.task_extra(config, settings, "draft_profile_change"))  # fmt: skip
     sources = "\n".join(
         [prompting.user_facts(config), *(_field_text(f, current_fields[f]) for f in current_fields)]
     )

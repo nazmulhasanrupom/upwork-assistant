@@ -32,6 +32,15 @@ FAKE_DRAFT_TEXT overrides the text (a JSON list for skills), FAKE_DRAFT_EM=1 put
 FAKE_DRAFT_NUM=1 adds a number that is in no source, FAKE_DRAFT_HTML=1 adds markup,
 FAKE_DRAFT_SAME=1 returns the current value, FAKE_DRAFT_BAD=1 answers without a value.
 
+Consolidate task ("# Task: consolidate memory", plan L4): adds one memory line and patches the
+skill review-proposal. Knobs: FAKE_CONS_BAD=1 (no usable answer), FAKE_CONS_QUOTE=<text> (the skill
+patch and the memory edit contain this text), FAKE_CONS_BIGMEM=1 (a memory edit of 4000 chars),
+FAKE_CONS_EM=1 (em dashes), FAKE_CONS_NOEDIT=1 (empty lists), FAKE_CONS_BADOLD=1 (the old text is
+not in the file), FAKE_CONS_SHRINK=1 (also removes a line).
+Research task ("# Task: weekly research", plan L5): FAKE_RES_BAD=1, FAKE_RES_NONE=1 (nothing to
+propose), FAKE_RES_AUTO=1 (type Auto), FAKE_RES_NOSRC=1, FAKE_RES_HTML=1, FAKE_RES_BADNO=1,
+FAKE_RES_MANY=1 (9 proposals), FAKE_RES_JS=1 (a javascript: source).
+
 Review task ("# Task: review proposal", plan R2) knobs:
   FAKE_REVIEW_EM=1      em dashes in the fixed version and the issues
   FAKE_REVIEW_NEWNUM=1  the fixed version adds a number that is in no source
@@ -66,6 +75,16 @@ task = (
     if "# Task: pick tactic" in prompt
     else "draftchange"
     if "# Task: draft profile change" in prompt
+    else "consolidate"
+    if "# Task: consolidate memory" in prompt
+    else "research"
+    if "# Task: weekly research" in prompt
+    else "wstrategy"
+    if "# Task: weekly strategy" in prompt
+    else "wprofile"
+    if "# Task: write profile text" in prompt
+    else "monthly"
+    if "# Task: monthly plan" in prompt
     else "write"
 )
 data = json.load(open("input.json"))
@@ -83,6 +102,7 @@ if log_path:
                     "model": model,
                     "effort": effort,
                     "cwd": os.getcwd(),
+                    "argv": argv,
                     "job_ids": [j["job_id"] for j in data.get("jobs", [])],
                     "prompt": prompt,
                     "input": data,
@@ -151,6 +171,51 @@ if task == "pick":
     out = {"keywords": [{"keyword": c, "reason": f"Good demand{sep}fair competition."} for c in chosen]}
     if os.environ.get("FAKE_PICK_BAD"):
         out = {"nope": 1}
+elif task == "consolidate":
+    quote = os.environ.get("FAKE_CONS_QUOTE", "")
+    dash = f" {EM} " if os.environ.get("FAKE_CONS_EM") else ", "
+    mem = [{"old": "", "new": f"- Prefers short replies{dash}no filler. {quote}".strip(), "why": "Seen in edits"}]
+    if os.environ.get("FAKE_CONS_BIGMEM"):
+        mem = [{"old": "", "new": "x" * 4000, "why": "big"}]
+    if os.environ.get("FAKE_CONS_SHRINK"):
+        mem.append({"old": data["memory"].splitlines()[0], "new": "", "why": "old"})
+    skill_old = "7. In the fixed version change only what is needed."
+    if os.environ.get("FAKE_CONS_BADOLD"):
+        skill_old = "this text is not in the skill"
+    patches = [
+        {
+            "skill": "review-proposal",
+            "old": skill_old,
+            "new": f"7. In the fixed version change only what is needed{dash}keep the voice. {quote}".strip(),
+            "why": "Freelancer kept voice",
+        }
+    ]
+    out = {"summary": f"Kept one lesson{dash}proposed one skill patch.", "memory_edits": mem, "skill_patches": patches}
+    if os.environ.get("FAKE_CONS_NOEDIT"):
+        out = {"summary": "Nothing new.", "memory_edits": [], "skill_patches": []}
+    if os.environ.get("FAKE_CONS_BAD"):
+        out = {"nope": 1}
+elif task == "research":
+    src = ["https://www.upwork.com/resources/example"]
+    if os.environ.get("FAKE_RES_JS"):
+        src = ["javascript:alert(1)"]
+    if os.environ.get("FAKE_RES_NOSRC"):
+        src = []
+    typ = "Auto" if os.environ.get("FAKE_RES_AUTO") else "Ask first"
+    text = "Add a short video to the profile"
+    if os.environ.get("FAKE_RES_HTML"):
+        text += " <script>x</script>"
+    props = [
+        {"op": "add_tactic", "text": text, "type": typ, "reason": f"Upwork {EM} news says so", "sources": src},
+        {"op": "mark_outdated", "tactic_no": 99 if os.environ.get("FAKE_RES_BADNO") else 5, "reason": "Feature changed", "sources": src},
+    ]
+    if os.environ.get("FAKE_RES_MANY"):
+        props = [{**props[0], "text": f"Tactic number {i}"} for i in range(9)]
+    out = {"proposals": props, "still_valid": [1, 2]}
+    if os.environ.get("FAKE_RES_NONE"):
+        out = {"proposals": [], "still_valid": []}
+    if os.environ.get("FAKE_RES_BAD"):
+        out = {"nope": 1}
 elif task == "tactic":
     no = int(os.environ.get("FAKE_TACTIC_NO") or (data["candidates"][0]["no"] if data["candidates"] else 0))
     if os.environ.get("FAKE_TACTIC_FAIL"):
@@ -159,7 +224,23 @@ elif task == "tactic":
     out = {"tactic_no": no, "field": os.environ.get("FAKE_TACTIC_FIELD", "title"), "reason": reason}
     if os.environ.get("FAKE_TACTIC_BAD"):
         out = {"nope": 1}
-elif task == "draftchange":
+elif task == "wstrategy":
+    dash = f" {EM} " if os.environ.get("FAKE_W_EM") else ", "
+    out = {"report": f"What is in demand\nn8n is up{dash}Zapier is flat.\nHow my proposals did\nFew sent."}
+    cands = data.get("candidates") or []
+    if data.get("change_allowed") and cands and not os.environ.get("FAKE_W_NOCHANGE"):
+        no = int(os.environ.get("FAKE_W_TACTIC") or cands[0]["no"])
+        out["change"] = {"tactic_no": no, "field": os.environ.get("FAKE_W_FIELD", "title"), "reason": "Demand for n8n is up."}
+    else:
+        out["change"] = None
+    if os.environ.get("FAKE_W_BAD"):
+        out = {"nope": 1}
+elif task == "monthly":
+    dash = f" {EM} " if os.environ.get("FAKE_M_EM") else ", "
+    out = {"report": f"Earnings and Connects\nNot much data{dash}keep going.\nNext month plan\nAdd one skill."}
+    if os.environ.get("FAKE_M_BAD"):
+        out = {"nope": 1}
+elif task in ("draftchange", "wprofile"):
     field_name = data["field"]
     cur = data["current"]
     override = os.environ.get("FAKE_DRAFT_TEXT")

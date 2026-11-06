@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ r.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ r.title }}</h1>
+  <p class="muted">{{ r.kind }} report · made {{ r.created_at | dt }} · <a href="/reports">All reports</a></p>
+</div>
+<pre class="text" id="report-body">{{ r.body }}</pre>
+{% if stats %}
+<details>
+  <summary>Numbers behind this report</summary>
+  <pre class="text small">{{ stats | tojson(indent=1) }}</pre>
+</details>
+{% endif %}
+{% endblock %}

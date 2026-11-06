@@ -199,7 +199,11 @@ def build_command(
     max_turns: int,
     max_budget_usd: float,
     effort: str | None = None,
+    tools: str = "Read,Write",
 ) -> list[str]:
+    """`tools` is the comma list for --tools. Web tools (WebSearch, WebFetch) are asked for by
+    the weekly research only (plan L5); they are also allowed without a prompt, since a headless
+    run cannot answer one."""
     cmd = [
         "claude",
         "-p",
@@ -212,7 +216,7 @@ def build_command(
         "--mcp-config",
         str(EMPTY_MCP_CONFIG),
         "--tools",
-        "Read,Write",
+        tools,
         "--permission-mode",
         "acceptEdits",  # lets Write create output.json in the run folder without a prompt
         "--max-turns",
@@ -220,6 +224,9 @@ def build_command(
         "--max-budget-usd",
         f"{float(max_budget_usd):.2f}",
     ]
+    web = [t for t in tools.split(",") if t in ("WebSearch", "WebFetch")]
+    if web:
+        cmd += ["--allowedTools", ",".join(web)]
     if effort:
         if effort not in EFFORT_LEVELS:
             raise ValueError(f"Unknown effort level {effort!r}. Use one of {EFFORT_LEVELS}.")
@@ -268,6 +275,7 @@ def run_claude(
     timeout: int = 900,
     prompt_text: str | None = None,
     record_run_id: str | None = None,
+    tools: str = "Read,Write",
 ) -> dict[str, Any]:
     """Run one headless Claude call. Returns a dict:
 
@@ -277,6 +285,7 @@ def run_claude(
     `prompt_text` replaces the content of `prompt_file` (use `prompting.build_prompt`, so the
     hard rules come first). `record_run_id` is the `runs` row this call belongs to; the
     `claude_calls` row is saved under it (the run folder keeps its own unique id).
+    `tools` replaces the default tool list (`Read,Write`); only the research asks for web tools.
     Raises BudgetCapReached (before any call), ClaudeRateLimited, ClaudeFailed.
     """
     settings = settings or Settings(conn)
@@ -296,7 +305,7 @@ def run_claude(
         json.dumps(prepare_input(input_obj), ensure_ascii=False, indent=1), encoding="utf-8"
     )
 
-    cmd = build_command(prompt, model, max_turns, max_budget_usd, effort)
+    cmd = build_command(prompt, model, max_turns, max_budget_usd, effort, tools)
     log.info("claude call: task=%s model=%s run=%s", task, model, run_id)
     try:
         proc = subprocess.run(

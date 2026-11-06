@@ -47,6 +47,10 @@ class Settings:
         self._defaults = load_defaults(defaults_path)
 
     @property
+    def conn(self) -> sqlite3.Connection:
+        return self._conn
+
+    @property
     def defaults(self) -> dict[str, Any]:
         return dict(self._defaults)
 

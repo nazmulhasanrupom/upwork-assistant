@@ -122,7 +122,11 @@ def test_save_validates(web):
     )
     assert r.status_code == 400 and "valid email" in r.text
     r = post_form(
-        client, "/settings/email", client_id="a", client_secret="b", recipient="x@y.z\nBcc: e@f.g"
+        client,
+        "/settings/email",
+        client_id="a",
+        client_secret="b",
+        recipient="x@y.example\nBcc: e@f.example",
     )
     assert r.status_code == 400
     assert app.state.settings.get("email.gmail_client_id") == ""
@@ -307,7 +311,7 @@ def test_send_refuses_header_injection(g):
     with respx.mock:
         route = respx.post(SEND_URL).mock(return_value=httpx.Response(200, json={}))
         with pytest.raises(GmailError):
-            g.send("to@x.example\nBcc: e@f.g", "s", "t", None)
+            g.send("to@x.example\nBcc: e@f.example", "s", "t", None)
         assert route.call_count == 0
 
 

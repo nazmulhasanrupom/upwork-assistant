@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Reports</h1>
+  <p class="muted">The weekly trend report and the monthly plan, newest first.
+    <a href="/reports"{% if not kind %} aria-current="page"{% endif %}>All</a> ·
+    <a href="/reports?kind=weekly"{% if kind == "weekly" %} aria-current="page"{% endif %}>Weekly</a> ·
+    <a href="/reports?kind=monthly"{% if kind == "monthly" %} aria-current="page"{% endif %}>Monthly</a></p>
+</div>
+{% if rows %}
+<div class="table-wrap">
+<table class="table" id="reports-table">
+  <thead><tr><th>Report</th><th>Kind</th><th>Period</th><th>Made</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr><td><a href="/reports/{{ r.id }}">{{ r.title }}</a></td><td>{{ r.kind }}</td><td>{{ r.period }}</td><td>{{ r.created_at | dt }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="muted" id="reports-empty">No reports yet. The weekly task runs on Monday and the monthly task on the 1st. You can also start them with Run now on the dashboard.</p>
+{% endif %}
+{% endblock %}

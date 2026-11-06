@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import Response
 
-from app import memory
+from app import memory, versioning
 from app.auth_routes import render
 from app.config import Config
 from app.llm import judging, prompting
@@ -42,7 +42,7 @@ log = logging.getLogger("context")
 
 router = APIRouter()
 
-BUILD_PROMPT = "prompts/build_user.md"
+BUILD_PROMPT = "prompts/build_me.md"
 BUILD_TASK = "build_user"
 PROPOSED_NAME = "USER.proposed.md"
 PROFILE_TAG = "untrusted_profile"
@@ -250,8 +250,12 @@ def context_save(request: Request, user_md: str = Form(""), style_md: str = Form
         default = prompting.default_style()
         if style_text.strip() and style_text.strip() != default:
             atomic_write(style_path, style_text)
+            versioning.commit(config, request.app.state.settings, "Update style.md", [style_path])
         elif style_path.exists():
             style_path.unlink()  # empty or the default text: use the default again
+            versioning.commit(
+                config, request.app.state.settings, "Reset style.md to the default", [style_path]
+            )
     except memory.OverCap as e:
         return _page(request, 400, user_md=user_md, style_md=style_md, error=str(e))
     except OSError:

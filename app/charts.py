@@ -277,3 +277,93 @@ def rank_svg(entry: dict[str, Any]) -> Markup | None:
     )
     parts.append("</svg>")
     return Markup("".join(parts))
+
+
+# ---------------------------------------------------------------- trends (plan I3)
+
+TREND_W = 720
+
+
+def bars_svg(rows: list[tuple[str, int]], title: str) -> Markup | None:
+    """Horizontal bars, one per (label, value). None when there is nothing to draw."""
+    rows = [(str(label), int(v)) for label, v in rows if v > 0]
+    if not rows:
+        return None
+    label_w, row_h, pad_r = 170, 24, 48
+    height = PAD_T + row_h * len(rows) + 8
+    top = max(v for _, v in rows)
+    plot_w = TREND_W - label_w - pad_r
+    summary = ", ".join(f"{label}: {v}" for label, v in rows)
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {TREND_W} {height}" role="img" '
+        f'aria-label="{escape(title)}" xmlns="http://www.w3.org/2000/svg">',
+        f"<title>{escape(title)}</title><desc>{escape(summary)}</desc>",
+    ]
+    for i, (label, v) in enumerate(rows):
+        y = PAD_T + i * row_h
+        w = max(2.0, plot_w * v / top)
+        parts.append(
+            f'<text class="tick" x="{label_w - 6}" y="{_n(y + 14)}" text-anchor="end">'
+            f"{escape(label[:26])}</text>"
+            f'<rect class="bar c1" x="{label_w}" y="{_n(y + 2)}" width="{_n(w)}" height="16" '
+            f'rx="2"><title>{escape(label)}: {v}</title></rect>'
+            f'<text class="val" x="{_n(label_w + w + 5)}" y="{_n(y + 14)}">{v}</text>'
+        )
+    parts.append("</svg>")
+    return Markup("".join(parts))
+
+
+def line_svg(points: list[tuple[date, float | None]], title: str, unit: str = "") -> Markup | None:
+    """A line over weeks. A week without a value leaves a gap. None when no week has a value."""
+    have = [(d, v) for d, v in points if v is not None]
+    if not have:
+        return None
+    height = 200
+    lo, hi = 0.0, float(max(v for _, v in have))
+    hi = float(nice_ceiling(hi)) if hi > 0 else 1.0
+    plot_w = TREND_W - RANK_PAD_L - PAD_R
+    plot_h = height - PAD_T - PAD_B
+    count = max(1, len(points) - 1)
+
+    def x(i: int) -> float:
+        return RANK_PAD_L + plot_w * i / count
+
+    def y(v: float) -> float:
+        return PAD_T + plot_h * (1 - (v - lo) / (hi - lo))
+
+    summary = ", ".join(f"{_day_label(d)}: {v}{unit}" for d, v in have)
+    parts = [
+        f'<svg class="chart" viewBox="0 0 {TREND_W} {height}" role="img" '
+        f'aria-label="{escape(title)}" xmlns="http://www.w3.org/2000/svg">',
+        f"<title>{escape(title)}</title><desc>{escape(summary)}</desc>",
+    ]
+    for t in _ticks(lo, hi):
+        ty = _n(y(t))
+        parts.append(
+            f'<line class="grid" x1="{RANK_PAD_L}" x2="{TREND_W - PAD_R}" y1="{ty}" y2="{ty}"/>'
+            f'<text class="tick" x="{RANK_PAD_L - 6}" y="{_n(y(t) + 4)}" text-anchor="end">'
+            f"{unit}{t}</text>"
+        )
+    segments: list[list[tuple[float, float]]] = [[]]
+    for i, (_, v) in enumerate(points):
+        if v is None:
+            segments.append([])
+        else:
+            segments[-1].append((x(i), y(v)))
+    for seg in segments:
+        if len(seg) > 1:
+            d = "M" + " L".join(f"{_n(px)} {_n(py)}" for px, py in seg)
+            parts.append(f'<path class="line" d="{d}"/>')
+    for i, (d, v) in enumerate(points):
+        if v is not None:
+            parts.append(
+                f'<circle class="dot" cx="{_n(x(i))}" cy="{_n(y(v))}" r="3">'
+                f"<title>{_day_label(d)}: {unit}{v}</title></circle>"
+            )
+    parts.append(
+        f'<text class="tick" x="{RANK_PAD_L}" y="{height - 10}" text-anchor="start">'
+        f"{_day_label(points[0][0])}</text>"
+        f'<text class="tick" x="{TREND_W - PAD_R}" y="{height - 10}" text-anchor="end">'
+        f"{_day_label(points[-1][0])}</text></svg>"
+    )
+    return Markup("".join(parts))

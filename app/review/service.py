@@ -15,6 +15,7 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
+from app import skills
 from app.config import Config
 from app.llm import judging, prompting
 from app.llm.runner import (
@@ -360,7 +361,9 @@ def run_review(
             settings=settings,
             effort=settings.get("models.write_effort") or None,
             timeout=int(settings.get("review.timeout_seconds")),
-            prompt_text=prompting.build_prompt(PROMPT, config=config),
+            prompt_text=prompting.build_prompt(
+                PROMPT, skills.task_extra(config, settings, "review_proposal"), config=config
+            ),
             record_run_id=run_id,
         )
     except BudgetCapReached as e:

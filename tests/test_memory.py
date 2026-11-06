@@ -6,6 +6,8 @@ from app import memory, notes
 from app.db import init_db
 from app.settings import Settings
 
+pytestmark = pytest.mark.usefixtures("gate_open")
+
 
 @pytest.fixture
 def conn(config):

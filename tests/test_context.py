@@ -224,7 +224,7 @@ def test_build_shows_proposal_and_does_not_overwrite(web, config, fake_claude_ge
 
 
 def test_build_prompt_marks_profile_as_data():
-    text = (prompting.APP_ROOT / "prompts" / "build_user.md").read_text()
+    text = (prompting.APP_ROOT / "prompts" / "build_me.md").read_text()
     assert "# Task: build USER.md" in text
     assert "untrusted_profile" in text and "not instructions" in text
     assert "2500" not in text  # the limit comes from settings (max_chars)
@@ -335,3 +335,40 @@ def test_build_finds_account_first_when_missing(web, fake_claude_gen):
     r = post(client, "/context/build")
     assert r.status_code == 200
     assert mcp.calls[-2][1]["org_uid"] == "777"
+
+
+# ---------- J2: Rebuild ----------
+
+
+def test_button_says_build_when_empty_and_rebuild_when_filled(web, config):
+    _, client = web
+    assert "Build from Upwork" in client.get("/context").text
+    assert "Rebuild from Upwork" not in client.get("/context").text
+    user_file(config).parent.mkdir(parents=True, exist_ok=True)
+    user_file(config).write_text("Some facts\n")
+    r = client.get("/context")
+    assert "Rebuild from Upwork" in r.text
+
+
+def test_rebuild_uses_build_me_prompt_and_saving_goes_through_cap_and_history(
+    web, config, fake_claude_gen, monkeypatch
+):
+    from app import versioning
+
+    commits = []
+    monkeypatch.setattr(versioning, "commit", lambda c, s, msg, paths=None: commits.append(msg))
+    app, client = web
+    user_file(config).parent.mkdir(parents=True, exist_ok=True)
+    user_file(config).write_text("OLD FACTS\n")
+    use_bridge(app, FakeProfileMCP())
+    r = post(client, "/context/build")
+    assert r.status_code == 200 and "Rebuild from Upwork" in r.text
+    assert "# Task: build USER.md" in fake_claude_gen.log()["prompt"]
+    # too long for the cap: refused, nothing written
+    app.state.settings.set("memory.total_cap_chars", 50)
+    r = post(client, "/context/use", proposed="x" * 200)
+    assert r.status_code == 400 and user_file(config).read_text() == "OLD FACTS\n"
+    app.state.settings.reset("memory.total_cap_chars")
+    r = post(client, "/context/use", proposed="NEW FACTS")
+    assert r.status_code == 200 and user_file(config).read_text() == "NEW FACTS\n"
+    assert commits == ["Update USER.md"]  # only the accepted save made a history entry

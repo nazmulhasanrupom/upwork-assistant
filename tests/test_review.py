@@ -383,3 +383,19 @@ def test_job_text_cannot_close_job_tag(web, with_user_md, fake_claude_gen):
     job = fake_claude_gen.log()["input"]["job"]["untrusted_job_post"]
     assert job.count("</untrusted_job_post>") == 1
     assert "<draft>" not in job
+
+
+def test_review_prompt_carries_skill_summaries_and_the_matching_skill(
+    web, config, with_user_md, fake_claude_gen
+):
+    """Plan L3: names + summaries for every skill, the full text only of the matching one."""
+    from app import skills
+
+    app, client = web
+    skills.ensure_skills(config, app.state.settings)
+    result_page(client, post_review(client, rate="30"))
+    prompt = fake_claude_gen.log()["prompt"]
+    assert "# Skills available" in prompt and "- check-keyword-rank: " in prompt
+    assert "# Skill for this task: review-proposal" in prompt
+    assert "Check each claim against the facts" in prompt
+    assert "Draft a profile change" not in prompt  # other skills: summary only

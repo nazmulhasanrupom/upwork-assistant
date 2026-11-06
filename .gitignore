@@ -10,3 +10,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+.ship/
+plan.md
+progress.md

@@ -30,9 +30,9 @@ def totp_secret_from(html: str) -> str:
 
 def setup_admin(client) -> str:
     """Run the two-step first-user flow. Returns the TOTP secret."""
-    token = csrf_from(client.get("/setup/admin").text)
+    token = csrf_from(client.get("/setup").text)
     r = client.post(
-        "/setup/admin",
+        "/setup/account",
         data={
             "username": USER,
             "password": PASSWORD,
@@ -41,15 +41,15 @@ def setup_admin(client) -> str:
             "csrf_token": token,
         },
     )
-    assert r.status_code == 303 and r.headers["location"] == "/setup/admin/totp"
-    r = client.get("/setup/admin/totp")
+    assert r.status_code == 303 and r.headers["location"] == "/setup/totp"
+    r = client.get("/setup/totp")
     assert r.status_code == 200
     secret = totp_secret_from(r.text)
     r = client.post(
-        "/setup/admin/confirm",
+        "/setup/confirm",
         data={"code": pyotp.TOTP(secret).now(), "csrf_token": csrf_from(r.text)},
     )
-    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert r.status_code == 303 and r.headers["location"] == "/setup"
     return secret
 
 
@@ -86,10 +86,11 @@ def test_setup_logs_in_and_closes(config):
     _, client = make_client(config)
     setup_admin(client)
     assert client.get("/").status_code == 200  # logged in right after setup
-    assert client.get("/setup/admin").status_code == 404
+    assert client.get("/setup/totp").status_code == 404  # the admin steps are closed
+    assert client.get("/setup").status_code == 200  # the wizard checklist is for the admin
     token = csrf_from(client.get("/").text)
     r = client.post(
-        "/setup/admin",
+        "/setup/account",
         data={"username": "x", "password": PASSWORD, "password2": PASSWORD, "csrf_token": token},
     )
     assert r.status_code == 404
@@ -97,17 +98,17 @@ def test_setup_logs_in_and_closes(config):
 
 def test_setup_rejects_weak_or_mismatched_password(config):
     _, client = make_client(config)
-    token = csrf_from(client.get("/setup/admin").text)
+    token = csrf_from(client.get("/setup").text)
     base = {"username": USER, "csrf_token": token, "setup_code": client.setup_code}
     assert (
         client.post(
-            "/setup/admin", data={**base, "password": "short", "password2": "short"}
+            "/setup/account", data={**base, "password": "short", "password2": "short"}
         ).status_code
         == 400
     )
     assert (
         client.post(
-            "/setup/admin", data={**base, "password": PASSWORD, "password2": "other"}
+            "/setup/account", data={**base, "password": PASSWORD, "password2": "other"}
         ).status_code
         == 400
     )
@@ -115,9 +116,9 @@ def test_setup_rejects_weak_or_mismatched_password(config):
 
 def test_setup_wrong_totp_creates_nothing(config):
     app, client = make_client(config)
-    token = csrf_from(client.get("/setup/admin").text)
+    token = csrf_from(client.get("/setup").text)
     r = client.post(
-        "/setup/admin",
+        "/setup/account",
         data={
             "username": USER,
             "password": PASSWORD,
@@ -128,15 +129,15 @@ def test_setup_wrong_totp_creates_nothing(config):
     )
     r = client.get(r.headers["location"])
     bad = {"code": "000000", "csrf_token": csrf_from(r.text)}
-    r = client.post("/setup/admin/confirm", data=bad)
+    r = client.post("/setup/confirm", data=bad)
     assert r.status_code == 400
     assert not auth.admin_exists(app.state.db)
 
 
 def _to_totp_page(client):
-    token = csrf_from(client.get("/setup/admin").text)
+    token = csrf_from(client.get("/setup").text)
     r = client.post(
-        "/setup/admin",
+        "/setup/account",
         data={
             "username": USER,
             "password": PASSWORD,
@@ -177,14 +178,14 @@ def test_reload_of_totp_page_makes_a_new_secret(config):
     app, client = make_client(config)
     first = _to_totp_page(client)
     s1 = totp_secret_from(first.text)
-    second = client.get("/setup/admin/totp")
+    second = client.get("/setup/totp")
     s2 = totp_secret_from(second.text)
     assert s1 != s2
     assert first.text.split("<svg")[1] != second.text.split("<svg")[1]
     # the page after the reload is the one that counts: old secret no longer works
     assert (
         client.post(
-            "/setup/admin/confirm",
+            "/setup/confirm",
             data={"code": pyotp.TOTP(s1).now(), "csrf_token": csrf_from(second.text)},
         ).status_code
         == 400
@@ -192,7 +193,7 @@ def test_reload_of_totp_page_makes_a_new_secret(config):
     assert not auth.admin_exists(app.state.db)
     # a wrong code keeps the same secret (no reload), and the newest secret finishes setup
     r = client.post(
-        "/setup/admin/confirm",
+        "/setup/confirm",
         data={"code": pyotp.TOTP(s2).now(), "csrf_token": csrf_from(second.text)},
     )
     assert r.status_code == 303 and auth.admin_exists(app.state.db)
@@ -202,18 +203,16 @@ def test_wrong_code_page_keeps_the_same_secret(config):
     _, client = make_client(config)
     page = _to_totp_page(client)
     s1 = totp_secret_from(page.text)
-    r = client.post(
-        "/setup/admin/confirm", data={"code": "000000", "csrf_token": csrf_from(page.text)}
-    )
+    r = client.post("/setup/confirm", data={"code": "000000", "csrf_token": csrf_from(page.text)})
     assert r.status_code == 400 and totp_secret_from(r.text) == s1 and "<svg" in r.text
 
 
 def test_totp_page_without_first_step_redirects_and_404_after_setup(config):
     _, client = make_client(config)
-    r = client.get("/setup/admin/totp")
-    assert r.status_code == 303 and r.headers["location"] == "/setup/admin"
+    r = client.get("/setup/totp")
+    assert r.status_code == 303 and r.headers["location"] == "/setup"
     setup_admin(client)
-    assert client.get("/setup/admin/totp").status_code == 404
+    assert client.get("/setup/totp").status_code == 404
 
 
 def test_wrong_password_wrong_totp_wrong_user(env):
@@ -235,7 +234,7 @@ def test_protected_page_redirects_and_public_pages_open(env):
 def test_redirect_to_setup_when_no_admin(config):
     _, client = make_client(config)
     r = client.get("/")
-    assert r.status_code == 303 and r.headers["location"] == "/setup/admin"
+    assert r.status_code == 303 and r.headers["location"] == "/setup"
 
 
 def test_htmx_request_when_logged_out_gets_401(env):
@@ -372,11 +371,11 @@ def test_session_for_deleted_admin_is_invalid(env):
 
 
 def _first_step(client, code):
-    token = csrf_from(client.get("/setup/admin").text)
+    token = csrf_from(client.get("/setup").text)
     data = {"username": USER, "password": PASSWORD, "password2": PASSWORD, "csrf_token": token}
     if code is not None:
         data["setup_code"] = code
-    return client.post("/setup/admin", data=data)
+    return client.post("/setup/account", data=data)
 
 
 def test_setup_fails_without_code(config):

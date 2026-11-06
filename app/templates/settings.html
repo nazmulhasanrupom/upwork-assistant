@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, flash, card, pill %}
+{% block title %}Settings{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Settings</h1>
+  <p class="muted">Every tunable value, by section. Secrets are never shown here. Email accounts live on the <a href="/settings/email">Email page</a>.</p>
+</div>
+{% if notice %}{{ flash("ok", notice) }}{% endif %}
+{% if error %}{{ flash("error", error) }}{% endif %}
+
+{% call card("Safety switches") %}
+  <div class="actions" id="switches">
+    <form method="post" action="/settings/toggle/dry_run" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="value" value="{{ 'off' if dry_run else 'on' }}">
+      <p><strong>Dry-run is {{ "ON" if dry_run else "OFF" }}.</strong> {% if dry_run %}Nothing is sent to Upwork.{% else %}Every write still needs a preview and your click.{% endif %}</p>
+      {{ button("Turn dry-run " ~ ("off" if dry_run else "on"), "secondary" if dry_run else "primary", small=true) }}
+    </form>
+    <form method="post" action="/settings/toggle/kill_switch" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="value" value="{{ 'off' if kill_switch else 'on' }}">
+      <p><strong>Kill switch is {{ "ON" if kill_switch else "OFF" }}.</strong> {% if kill_switch %}All tasks are stopped.{% else %}Tasks run on their schedules.{% endif %}</p>
+      {{ button("Turn kill switch " ~ ("off" if kill_switch else "on"), "danger" if not kill_switch else "secondary", small=true) }}
+    </form>
+  </div>
+{% endcall %}
+
+{% for sec in sections %}
+<details class="card panel" id="section-{{ sec.name }}"{% if sec.has_errors or sec.name == "general" %} open{% endif %}>
+  <summary class="card-title">{{ sec.name }}</summary>
+  <form method="post" action="/settings/save/{{ sec.name }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% for it in sec["items"] %}
+    <label class="field">
+      <span>{{ it.key }}{% if it.changed %} {{ pill("changed", "info") }}{% endif %}{% if it.readonly %} <span class="hint">(set by the app)</span>{% endif %}</span>
+      {% if it.readonly %}
+        <code id="ro-{{ it.key }}">{{ it.value or "(empty)" }}</code>
+      {% elif it.kind == "bool" %}
+        <input type="hidden" name="{{ it.key }}" value="0">
+        <input type="checkbox" name="{{ it.key }}" value="1"{% if it.checked %} checked{% endif %}>
+      {% elif it.kind == "list" %}
+        <textarea name="{{ it.key }}" rows="3" aria-label="{{ it.key }}">{{ it.value }}</textarea>
+        <span class="hint">One item per line.</span>
+      {% elif it.kind == "number" %}
+        <input name="{{ it.key }}" inputmode="decimal" value="{{ it.value }}" required>
+      {% else %}
+        <input name="{{ it.key }}" value="{{ it.value }}">
+      {% endif %}
+      {% if it.error %}<span class="hint error" role="alert">{{ it.error }}</span>{% endif %}
+    </label>
+    {% endfor %}
+    {{ button("Save " ~ sec.name, "primary") }}
+  </form>
+</details>
+{% endfor %}
+
+{% call card("Export") %}
+  <p>Downloads your settings and a count of what is stored. No secrets, no tokens, no job text.</p>
+  <div class="actions">{{ button("Download JSON", "secondary", href="/settings/export.json") }}</div>
+{% endcall %}
+
+{% call card("Delete all data") %}
+  <p>Removes the database rows, the memory, skills and run files, and the saved Upwork and Gmail
+    tokens. The settings go back to the defaults and the admin account is deleted. You are logged out
+    and the setup wizard starts again. This cannot be undone. Export first if you want a copy.</p>
+  <form method="post" action="/settings/delete-all" class="stack" id="delete-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field"><span>Type <code>{{ phrase }}</code></span>
+      <input name="phrase" autocomplete="off" required></label>
+    <label class="field"><span>Your password</span>
+      <input type="password" name="password" autocomplete="current-password"></label>
+    <label class="field"><span>Or a current 6 digit code <span class="hint">(use one of the two)</span></span>
+      <input name="code" inputmode="numeric" autocomplete="one-time-code"></label>
+    {{ button("Delete all data", "danger") }}
+  </form>
+{% endcall %}
+{% endblock %}

@@ -12,7 +12,7 @@
 <p>Link: <code class="wrap">{{ otpauth_url }}</code></p>
 <p>Then enter the 6-digit code to finish.</p>
 {% if error %}{{ flash("error", error) }}{% endif %}
-<form method="post" action="/setup/admin/confirm" class="stack">
+<form method="post" action="/setup/confirm" class="stack">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label class="field"><span>Code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" required autofocus></label>
   {{ button("Create admin", "primary") }}

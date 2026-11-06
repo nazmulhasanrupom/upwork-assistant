@@ -122,6 +122,9 @@
       <div class="difftext">{% for kind, text in f.ops %}{% if kind == "ins" %}<ins>{{ text }}</ins>{% elif kind == "del" %}<del>{{ text }}</del>{% else %}{{ text }}{% endif %}{% endfor %}</div>
       {% endfor %}
       <p class="small muted">Red = on your profile now, green = {% if it.kind == "profile_change" %}the new text{% else %}restored{% endif %}. Approve asks Upwork for a preview of each change and saves a copy of the current profile first. It changes nothing on Upwork by itself: you confirm the preview on the Profile history page.</p>
+      {% elif it.kind == "playbook_update" and it.after_data %}
+      <pre class="text">{{ it.after_data.summary }}</pre>
+      <p class="small muted">From the weekly web research. Approve changes the playbook; nothing on Upwork. Web pages are untrusted, so check the sources.</p>
       {% elif it.before or it.after %}
       <div class="before-after">
         {% if it.before %}<div><h4>Before</h4><pre class="text">{{ it.before }}</pre></div>{% endif %}

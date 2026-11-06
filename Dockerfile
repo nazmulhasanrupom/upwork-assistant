@@ -8,7 +8,7 @@ ARG SUPERCRONIC_SHA1_ARM64=9d4c2000493215a1898502b2fc2dada3e8ea8c7a
 ARG SUPERCRONIC_SHA1_ARM=9224966499cd319ed85759e9b6442f885d920c4f
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates tzdata \
+ && apt-get install -y --no-install-recommends curl ca-certificates tzdata git \
  && rm -rf /var/lib/apt/lists/*
 
 # supercronic: static cron runner, picked by CPU architecture, checksum verified

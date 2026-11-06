@@ -1,7 +1,7 @@
 # Upwork Assistant: Final Draft Plan (SPEC2)
 
 Version: draft 1 (2026-11-06)
-Owner: Nazmul Hasan Rupom
+Owner: the owner
 Stack: Claude Code + Upwork MCP + Python, self-hosted on Coolify
 Repo: public, open source. Freelancer accounts only (no agency support).
 

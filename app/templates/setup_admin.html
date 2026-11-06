@@ -4,10 +4,10 @@
 {% block main_class %}narrow{% endblock %}
 {% block content %}
 {% call card(cls="panel auth-card") %}
-<h1>Create the admin account</h1>
+<h1>Setup, step 1 of 10: create the admin account</h1>
 <p class="muted">This page only works until the first admin exists.</p>
 {% if error %}{{ flash("error", error) }}{% endif %}
-<form method="post" action="/setup/admin" class="stack">
+<form method="post" action="/setup/account" class="stack">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label class="field"><span>Setup code</span><input name="setup_code" autocomplete="off" required>
     <small class="hint">Printed in the container log as "SETUP CODE".</small></label>

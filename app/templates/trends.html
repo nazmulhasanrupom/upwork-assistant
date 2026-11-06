@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_macros.html" import flash %}
+{% block title %}Trends{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Trends</h1>
+  <p class="muted">Counted by Python from every job the daily run saw, also the ones it dropped. No Claude cost. The weekly task reads these numbers.</p>
+</div>
+
+<section aria-labelledby="tr-skills">
+  <h2 id="tr-skills">Skills in demand</h2>
+  {% if skills_chart %}
+  <div id="trends-skills">{{ skills_chart }}</div>
+  {% else %}
+  <p class="muted" id="trends-skills-empty">No jobs with skills in the last {{ weeks_count }} weeks yet.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="tr-budget">
+  <h2 id="tr-budget">Median budget</h2>
+  <p class="muted small">Fixed price and hourly are kept apart. A week with too few jobs that show a budget has no point.</p>
+  {% if fixed_chart %}<div id="trends-fixed">{{ fixed_chart }}</div>{% else %}<p class="muted">No fixed-price budgets yet.</p>{% endif %}
+  {% if hourly_chart %}<div id="trends-hourly">{{ hourly_chart }}</div>{% else %}<p class="muted">No hourly rates yet.</p>{% endif %}
+</section>
+
+<section aria-labelledby="tr-week">
+  <h2 id="tr-week">Last 7 days against the 7 days before</h2>
+  <p class="muted small">{{ comparison.jobs }} jobs seen ({{ comparison.jobs_before }} the week before).</p>
+  {% if comparison.skills %}
+  <div class="table-wrap">
+  <table class="table" id="trends-table">
+    <thead><tr><th>Skill</th><th>Jobs</th><th>Before</th><th>Median fixed</th><th>Change</th><th>Median hourly</th><th>Change</th></tr></thead>
+    <tbody>
+    {% for r in comparison.skills %}
+    <tr>
+      <td>{{ r.skill }}</td><td>{{ r.count }}</td><td>{{ r.count_before }}</td>
+      <td>{{ "$%.0f" | format(r.median_fixed) if r.median_fixed is not none else "n/a" }}</td>
+      <td>{{ "%+.0f" | format(r.median_fixed_change) if r.median_fixed_change is not none else "n/a" }}</td>
+      <td>{{ "$%.0f" | format(r.median_hourly) if r.median_hourly is not none else "n/a" }}</td>
+      <td>{{ "%+.0f" | format(r.median_hourly_change) if r.median_hourly_change is not none else "n/a" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

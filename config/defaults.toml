@@ -6,6 +6,13 @@ dry_run = true            # SPEC 14: nothing is sent to Upwork while true
 kill_switch = false       # stops all tasks at once
 timezone = "UTC"
 
+[setup]                   # SPEC 4.2: first-run wizard progress (written by /setup)
+done_steps = []                 # step keys the owner finished or skipped
+finished = false                # the owner pressed Finish on the last step
+keywords_max = 30               # most search keywords the wizard accepts
+keyword_max_chars = 80          # longest single keyword
+cron_max_chars = 100            # longest schedule text
+
 [pay]                     # SPEC 8.2, 8.3
 good_spending = 5000      # min client total spent (USD)
 low_rate_max = 10         # rate_paid <= this is LOW
@@ -55,6 +62,14 @@ input_max_chars = 20000         # biggest text the Profile page accepts per box
 build_profile_max_chars = 12000 # profile text sent to Claude is cut to this
 build_max_turns = 4
 build_max_budget_usd = 0.30
+
+[versioning]              # SPEC2 5.2, plan L2 (git history of memory/ and skills/)
+git_timeout_seconds = 20        # every git call is stopped after this long
+author_name = "Upwork Assistant"        # generic author of every commit
+author_email = "assistant@localhost"
+message_max_chars = 200         # a commit message is cut to this
+page_commits = 30               # commits shown on /learning
+diff_max_chars = 6000           # a diff longer than this is cut on the page
 
 [review]                  # SPEC2 4.B, plan R (proposal reviewer)
 length_warn_chars = 1800        # a longer cover letter gets a warning
@@ -121,6 +136,8 @@ daily = "0 */2 * * *"
 digest = "0 21 * * *"
 weekly = "0 6 * * 1"
 monthly = "0 7 1 * *"
+consolidate = "0 6 * * 1"        # plan L4: weekly consolidation (Monday)
+research = "30 6 * * 1"           # plan L5: weekly web research
 profile_test = "30 7 * * *"     # plan O3: checked every day, but a test is only started when profile_loop.every_days have passed
 scheduler_interval_minutes = 5
 grace_minutes = 30        # a slot missed by more than this is skipped, not replayed (plan I4)
@@ -131,6 +148,8 @@ digest = ""
 weekly = ""
 monthly = ""
 profile_test = ""
+consolidate = ""
+research = ""
 
 [models]                  # SPEC 4.4, 7.2
 think = "claude-opus-5-5"
@@ -302,3 +321,68 @@ max_login_tries = 5           # wrong tries before the login locks
 lockout_minutes = 15
 session_hours = 12
 password_min_length = 12
+
+[skills]                  # SPEC2 5.1 layer 3, plan L3 (skills in <DATA_DIR>/skills/<name>/SKILL.md)
+max_chars = 3000                # biggest SKILL.md the assistant may write
+name_max_chars = 40             # longest skill folder name
+summary_max_chars = 160         # a summary shown in prompts is cut to this
+task_map = ["review_proposal=review-proposal", "draft_profile_change=draft-profile-change", "check_keyword_rank=check-keyword-rank"]   # Claude task=skill: the full text of that skill is loaded for that task
+
+[consolidation]           # SPEC2 5.3, plan L4 (weekly "dreaming", Opus)
+enabled = true
+days = 7                        # how many days of notes and signals are read
+notes_max_chars = 12000         # daily notes sent to Claude are cut to this
+signals_max_items = 40          # most clicks, diffs and outcomes sent (each list)
+item_max_chars = 600            # one diff or note line sent is cut to this
+max_memory_edits = 10           # edits to MEMORY.md accepted per run
+max_skill_patches = 3           # skill patches accepted per run
+verbatim_max_words = 20         # a patch that repeats more than this many words of job or client text is refused
+skill_patches_need_approval = true   # false: skill patches are applied by the job itself (still committed)
+summary_max_chars = 1500        # the DREAMS.md summary is cut to this
+dreams_keep = 12                # most weekly sections kept in DREAMS.md
+reason_max_chars = 300
+max_turns = 6
+max_budget_usd = 1.00
+timeout_seconds = 900
+
+[research]                # SPEC2 6, plan L5 (weekly web research, D11 = allowed)
+enabled = true                  # the switch: off means the task and the button do nothing
+max_turns = 15
+max_budget_usd = 0.80
+timeout_seconds = 900
+max_proposals = 5               # approval items made per run
+text_max_chars = 300            # a tactic text is cut to this (longer is refused)
+reason_max_chars = 400
+max_sources = 3                 # source links kept per proposal
+allowed_types = ["Ask first", "Manual on upwork.com"]   # Type a new tactic may get (never Auto)
+last_run = ""                   # UTC ISO time of the last run; written by the task
+
+[trends]                  # plan I1/I3: skill counts and median budgets, from skills_seen + jobs
+top_skills = 15                 # skills listed in the weekly stats and on /trends
+weeks = 12                      # weeks drawn on /trends
+min_jobs_for_median = 3         # a median budget needs at least this many jobs with a budget
+
+[weekly]                  # SPEC 9.2, plan I1 (Python stats, Opus strategy, Sonnet profile text)
+enabled = true
+window_days = 7                 # the stats cover this many days, and the same length before
+notes_max_chars = 8000          # daily notes sent to Claude are cut to this
+report_max_chars = 6000         # the saved report is cut to this
+reason_max_chars = 300
+think_max_turns = 6
+think_max_budget_usd = 1.00
+think_timeout_seconds = 900
+write_max_turns = 4
+write_max_budget_usd = 0.50
+write_timeout_seconds = 600
+email = true                    # send the report by email (also needs email.events.weekly)
+
+[monthly]                 # SPEC 9.3, plan I2 (earnings, profile audit, next month plan; Opus)
+enabled = true
+financials = false              # true: also read get_freelancer_financials (READ tool, args unverified live)
+notes_max_chars = 8000
+report_max_chars = 8000
+financials_max_chars = 4000     # the raw financials answer sent to Claude is cut to this
+max_turns = 6
+max_budget_usd = 1.50
+timeout_seconds = 900
+email = true                    # send the report by email (also needs email.events.monthly)

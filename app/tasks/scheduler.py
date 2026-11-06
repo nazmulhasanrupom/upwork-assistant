@@ -128,7 +128,7 @@ def tick(
             settings.set(key, stamp)
             result.skipped.append(name)
             continue
-        if name in trigger.SCHEDULED_MANUAL and not _interval_passed(settings, name, now):
+        if name == "profile_test" and not _interval_passed(settings, name, now):
             settings.set(key, stamp)  # not due yet (plan O3): this slot is handled
             continue
         try:

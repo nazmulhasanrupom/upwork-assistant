@@ -23,8 +23,14 @@ from app.tasks import lock
 log = logging.getLogger("trigger")
 
 TASKS = ("daily", "digest", "weekly", "monthly")  # scheduled tasks (and Run now on the dashboard)
-MANUAL_TASKS = ("keywords", "profile_test")  # started by a button (plan KW1, O3)
-SCHEDULED_MANUAL = ("profile_test",)  # also started by the scheduler, but only when it is due (O3)
+MANUAL_TASKS = (
+    "keywords",
+    "profile_test",
+    "consolidate",
+    "research",
+)  # started by a button (KW1, O3, L4, L5)
+# also started by the scheduler: profile_test when due (O3); consolidate, research weekly (L4, L5)
+SCHEDULED_MANUAL = ("profile_test", "consolidate", "research")
 PACKAGE = "app.tasks"  # tests point this at a fake package
 ROOT = Path(__file__).resolve().parent.parent.parent  # /app in the image
 

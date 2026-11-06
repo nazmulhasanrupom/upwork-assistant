@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% from "_macros.html" import button, flash, pill %}
+{% block title %}Learning{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Learning history</h1>
+  <p class="muted">Every time the assistant changes its own memory, playbook or skills, one entry is saved here. "Undo" adds a new entry that reverses that one change. It never touches Upwork.</p>
+</div>
+
+{% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
+{% if error %}{{ flash("error", error) }}{% endif %}
+
+<section aria-labelledby="lh-jobs">
+  <h2 id="lh-jobs">Weekly jobs</h2>
+  <p class="muted small">Only these two jobs may change long-term memory, skills or the playbook, and every skill or playbook change waits for your click on the <a href="/approvals">Approvals</a> page. The daily runs only write notes.</p>
+  <div id="learning-jobs">
+  {% for j in jobs %}
+  <div class="card panel">
+    <div class="draft-head">
+      <strong>{% if j.name == "consolidate" %}Consolidation (memory and skills){% else %}Research (web search, playbook){% endif %}</strong>
+      <span class="muted small">cron: <code>{{ j.schedule }}</code>{% if not j.enabled %} · switched off in the settings{% endif %}{% if j.running %} · running now{% endif %}</span>
+    </div>
+    <p class="small muted">{% if j.name == "consolidate" %}Reads the last week of notes, your clicks, draft edits and outcomes. Makes small edits to MEMORY.md and proposes skill patches.{% else %}Searches the web for Upwork news. Proposes new or outdated tactics for the playbook. It has no access to Upwork.{% endif %}</p>
+    {% if j.last %}<p class="small muted">Last run: {{ j.last.started | dt }} · {{ j.last.status }}{% if j.last.error %} · {{ j.last.error }}{% endif %}</p>{% endif %}
+    <form method="post" action="/learning/run/{{ j.name }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {{ button("Run now", "secondary", small=true) }}
+    </form>
+  </div>
+  {% endfor %}
+  </div>
+</section>
+
+<section aria-labelledby="lh-dreams">
+  <h2 id="lh-dreams">Dreams</h2>
+  {% if dreams %}
+  <pre class="text" id="learning-dreams">{{ dreams }}</pre>
+  {% else %}
+  <p class="muted">Nothing yet. The weekly consolidation writes its summary here.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="lh-skills">
+  <h2 id="lh-skills">Skills <span class="count">{{ skill_rows | length }}</span></h2>
+  {% if skill_rows %}
+  <ul id="learning-skills">
+    {% for s in skill_rows %}<li><strong>{{ s.name }}</strong> <span class="muted">{{ s.summary }}</span></li>{% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No skills yet.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="lh-commits">
+  <h2 id="lh-commits">Changes <span class="count">{{ commits | length }}</span></h2>
+  {% if commits %}
+  <div id="learning-commits">
+    {% for c in commits %}
+    <div class="card panel">
+      <div class="draft-head">
+        <strong>{{ c.subject }}</strong>
+        <span class="muted small">{{ c.date | dt }} · <code>{{ c.short }}</code></span>
+        {% if c.files %}<span class="muted small">{{ c.files | join(", ") }}</span>{% endif %}
+        {% if not c.root %}
+        <form method="post" action="/learning/{{ c.sha }}/undo" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          {{ button("Undo", "secondary", small=true) }}
+        </form>
+        {% endif %}
+      </div>
+      {% if c.diff %}
+      <details class="advanced">
+        <summary>Show the change</summary>
+        <pre class="text">{{ c.diff }}{% if c.cut %}
+... (cut){% endif %}</pre>
+      </details>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% elif not error %}
+  <p class="muted">No change is saved yet. The first one appears when the assistant edits its memory or playbook.</p>
+  {% endif %}
+</section>
+{% endblock %}

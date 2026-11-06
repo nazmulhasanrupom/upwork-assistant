@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from app import noise_gate, versioning
 from app.config import Config
 
 CAPPED = ("USER.md", "MEMORY.md")
@@ -93,10 +94,16 @@ def check_cap(config: Config, settings: Any, name: str, text: str) -> None:
         )
 
 
-def write_memory_file(config: Config, settings: Any, name: str, text: str) -> None:
-    """The one write path for memory files. Raises OverCap (nothing written) or OSError."""
+def write_memory_file(
+    config: Config, settings: Any, name: str, text: str, message: str | None = None
+) -> None:
+    """The one write path for memory files. Raises OverCap (nothing written) or OSError.
+    Then one version-history commit (never fails the write; plan L2)."""
+    if name == "MEMORY.md":
+        noise_gate.require("MEMORY.md")  # long-term memory: consolidation or an approved item only
     check_cap(config, settings, name, text)
     atomic_write(memory_file(config, name), text)
+    versioning.commit(config, settings, message or f"Update {name}", [memory_file(config, name)])
 
 
 # ---------------------------------------------------------------- search index

@@ -1,7 +1,7 @@
 # Upwork Assistant: Draft Plan
 
 Status: DRAFT v0.2 (6 Nov 2026)
-Author: Nazmul Hasan Rupom
+Author: the owner
 Type: public, open-source, self-hosted
 
 ---

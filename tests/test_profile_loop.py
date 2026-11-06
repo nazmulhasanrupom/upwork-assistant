@@ -293,6 +293,17 @@ def test_run_prompts_follow_the_rules(conn, settings, config, fake_claude_gen, u
     assert "untrusted_competitor_data" not in blob2
 
 
+def test_draft_prompt_carries_the_matching_skill(conn, settings, config, fake_claude_gen, user_md):
+    from app import skills
+
+    skills.ensure_skills(config, settings)
+    run(conn, settings, config)
+    first, second = fake_claude_gen.logs()
+    assert "# Skill for this task" not in first["prompt"]  # the pick step has no skill
+    assert "# Skill for this task: draft-profile-change" in second["prompt"]
+    assert "- review-proposal: " in second["prompt"]  # the other skills: name and summary only
+
+
 def test_run_sends_email_event_once(conn, settings, config, fake_claude_gen, user_md, monkeypatch):
     seen = []
     monkeypatch.setattr(mail, "send_event", lambda *a, **k: seen.append((a[1], a[2])) or mail.SENT)

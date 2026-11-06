@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import approvals, auth, playbook
+from app import approvals, auth, playbook, skills, versioning
 from app.approvals_routes import router as approvals_router
 from app.auth_routes import router as auth_router
 from app.config import Config, load_config
@@ -18,6 +18,7 @@ from app.db import init_db
 from app.gmail_routes import router as gmail_router
 from app.inbox_routes import router as inbox_router
 from app.job_routes import router as job_router
+from app.learning_routes import router as learning_router
 from app.pages import install_filters
 from app.pages import router as pages_router
 from app.playbook_routes import router as playbook_router
@@ -25,6 +26,9 @@ from app.profile_routes import router as profile_router
 from app.review.routes import router as review_router
 from app.runs_routes import router as runs_router
 from app.settings import Settings
+from app.settings_routes import router as settings_router
+from app.setup_routes import router as setup_router
+from app.trends_routes import router as trends_router
 from app.upwork.routes import router as upwork_router
 
 APP_DIR = Path(__file__).parent
@@ -49,7 +53,15 @@ def create_app(config: Config | None = None) -> FastAPI:
         code = auth.issue_setup_code(app.state.db, config.secret_key)
         print(f"SETUP CODE: {code}", flush=True)
     try:
-        playbook.ensure_seeded(config)
+        versioning.ensure_repo(config, app.state.settings)
+    except Exception:
+        logging.getLogger("versioning").exception("Could not start the version history")
+    try:
+        skills.ensure_skills(config, app.state.settings)
+    except OSError:
+        logging.getLogger("skills").exception("Could not copy the starter skills")
+    try:
+        playbook.ensure_seeded(config, settings=app.state.settings)
     except OSError:
         logging.getLogger("playbook").exception("Could not seed the playbook")
     app.state.templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
@@ -88,8 +100,10 @@ def create_app(config: Config | None = None) -> FastAPI:
         return response
 
     app.include_router(auth_router)
+    app.include_router(setup_router)
     app.include_router(upwork_router)
     app.include_router(gmail_router)
+    app.include_router(settings_router)
     app.include_router(context_router)
     app.include_router(runs_router)
     app.include_router(review_router)
@@ -98,6 +112,8 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(inbox_router)
     app.include_router(profile_router)
     app.include_router(playbook_router)
+    app.include_router(learning_router)
+    app.include_router(trends_router)
     app.include_router(pages_router)
 
     @app.get("/healthz")
