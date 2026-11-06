@@ -48,11 +48,30 @@
 {% endcall %}
 
 {% call card("How to log in") %}
-  <p>The Upwork login lives in Claude Code, inside this app's container. Do this once, and again
-    if the login expires:</p>
+  <p>The Upwork login lives in Claude Code, inside this app's container. Do this once on your
+    own computer, and again if the login expires:</p>
   <ol id="login-steps" class="steps">
-    {% for step in steps %}<li>{{ step }}</li>
-    {% endfor %}
+    <li>Install Claude Code, then run these commands in a terminal:
+      <pre class="text" id="login-commands">{{ login_commands }}</pre></li>
+    <li>In Claude, type <code>/mcp</code>, choose <code>upwork</code>, choose
+      <code>Authenticate</code>, and log in to Upwork in the browser. Then type
+      <code>/exit</code>.</li>
+    <li>Upload <code>$HOME/upwork-claude-test/.credentials.json</code> here, in the
+      "Import Claude login" box below.</li>
+    <li>Press <strong>Test connection</strong>.</li>
   </ol>
+  <p class="muted small">That file holds a login token. After the import you can delete it from
+    your computer (and the <code>upwork-claude-test</code> folder) if you want.</p>
+{% endcall %}
+
+{% call card("Import Claude login") %}
+  <p>Upload the login file you made on your own computer (steps above). The app keeps only the
+    Upwork part of it and stores it privately in the container. Max {{ max_upload_kb }} KB.</p>
+  <form method="post" action="/upwork/import" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>File <code>.credentials.json</code>
+      <input type="file" name="file" accept=".json,application/json" required></label>
+    <div class="actions">{{ button("Import Claude login", "primary") }}</div>
+  </form>
 {% endcall %}
 {% endblock %}

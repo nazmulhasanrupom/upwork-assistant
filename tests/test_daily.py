@@ -234,9 +234,10 @@ def test_call_limit_leaves_jobs_for_next_run(conn, settings, config):
     assert "2118442174097105410" not in saved  # and everything after it
     assert "2118387252193629626" not in saved
     assert len(names) == 7
-    assert "MCP call limit reached" in next(
-        (config.data_dir / "notes" / "daily").glob("*.md")
-    ).read_text()
+    assert (
+        "MCP call limit reached"
+        in next((config.data_dir / "notes" / "daily").glob("*.md")).read_text()
+    )
 
 
 def test_candidates_passed_to_hook(conn, settings, config, monkeypatch):

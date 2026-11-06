@@ -31,9 +31,16 @@ def test_fixture_get_job_flags(settings):
 
 def test_clean_job_has_no_flags(settings):
     j = {
-        "job_type": "hourly", "budget_max": 30.0, "client_rating": 4.9, "client_reviews": 20,
-        "hire_rate": 80, "proposals_tier": "10 to 15", "connects_cost": 8,
-        "connects_balance": 100, "can_apply": True, "reviews": [{"score": 5}],
+        "job_type": "hourly",
+        "budget_max": 30.0,
+        "client_rating": 4.9,
+        "client_reviews": 20,
+        "hire_rate": 80,
+        "proposals_tier": "10 to 15",
+        "connects_cost": 8,
+        "connects_balance": 100,
+        "can_apply": True,
+        "reviews": [{"score": 5}],
     }
     assert flags(j, settings) == []
 

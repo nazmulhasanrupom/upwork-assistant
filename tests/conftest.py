@@ -77,3 +77,10 @@ def fake_claude(tmp_path, monkeypatch):
 @pytest.fixture
 def fake_claude_stream(tmp_path, monkeypatch):
     return _install_fake_claude(tmp_path, monkeypatch, "claude_stream")
+
+
+@pytest.fixture(autouse=True)
+def clean_claude_env(monkeypatch):
+    """The image sets CLAUDE_CONFIG_DIR=/data/claude. Tests choose their own folder."""
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("UPWORK_MCP_URL", raising=False)

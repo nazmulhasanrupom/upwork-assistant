@@ -46,8 +46,7 @@ def migrate(conn: sqlite3.Connection, directory: Path | None = None) -> list[int
     """Apply migration files newer than schema_version. Returns applied versions."""
     directory = directory or MIGRATIONS_DIR
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS schema_version ("
-        "version INTEGER PRIMARY KEY, applied_at TEXT)"
+        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, applied_at TEXT)"
     )
     done = current_version(conn)
     applied = []

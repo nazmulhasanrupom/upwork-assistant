@@ -203,7 +203,12 @@ def test_save_job_and_skills(conn, settings):
     sj = load("smart_search_most_recent.json")["jobs"]
     job = J.cut_down(sj[2], settings=settings)
     J.save_job(
-        conn, job, status="candidate", tier="MID", tier_estimated=True, rate_paid=17.0,
+        conn,
+        job,
+        status="candidate",
+        tier="MID",
+        tier_estimated=True,
+        rate_paid=17.0,
         red_flags=["x"],
     )
     row = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job["id"],)).fetchone()

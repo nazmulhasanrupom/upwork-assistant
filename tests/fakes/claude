@@ -17,6 +17,7 @@ if log_path:
             {
                 "argv": sys.argv[1:],
                 "cwd": os.getcwd(),
+                "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"),
                 "has_oauth": bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")),
                 "has_api_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
                 "input_exists": os.path.exists("input.json"),

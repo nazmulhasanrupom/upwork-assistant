@@ -317,9 +317,7 @@ def cut_down(
             }
         )
 
-    questions = [
-        truncate_untrusted(q, max_chars) for q in detail.get("screening_questions") or []
-    ]
+    questions = [truncate_untrusted(q, max_chars) for q in detail.get("screening_questions") or []]
 
     verification = client.get("verification_status")
     payment_verified = None if verification is None else str(verification).upper() == "VERIFIED"

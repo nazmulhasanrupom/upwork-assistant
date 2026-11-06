@@ -19,9 +19,7 @@ def test_data_dir_override():
     assert cfg.db_path.as_posix() == "/tmp/x/app.db"
 
 
-@pytest.mark.parametrize(
-    "value", [None, "", "short", "x" * 31, "change-me-long-random-string"]
-)
+@pytest.mark.parametrize("value", [None, "", "short", "x" * 31, "change-me-long-random-string"])
 def test_bad_key_refused(value):
     env = {} if value is None else {"SECRET_KEY": value}
     with pytest.raises(ConfigError):

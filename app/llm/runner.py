@@ -71,9 +71,30 @@ def looks_like_auth_error(text: str) -> bool:
     return bool(_AUTH_RE.search(text or ""))
 
 
+def claude_config_dir(config: Config | None = None, settings: Settings | None = None) -> Path:
+    """Where Claude Code keeps its config and the Upwork login (CLAUDE_CONFIG_DIR).
+
+    Order: setting `claude.config_dir`, the CLAUDE_CONFIG_DIR env var, then <data dir>/claude.
+    """
+    if settings is not None:
+        configured = str(settings.get("claude.config_dir") or "").strip()
+        if configured:
+            return Path(configured)
+    env = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if env:
+        return Path(env)
+    base = config.data_dir if config is not None else Path(os.environ.get("DATA_DIR") or "/data")
+    return base / "claude"
+
+
 def claude_env(config: Config | None = None) -> dict[str, str]:
-    """Environment for the claude child process. Passes the token or key through."""
+    """Environment for the claude child process. Passes the token or key through.
+
+    CLAUDE_CONFIG_DIR is always set. Judge/write runs use --strict-mcp-config with an empty
+    config, so even though this folder holds the Upwork login they get no Upwork tools.
+    """
     env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = str(claude_config_dir(config))
     if config is not None:
         if config.claude_code_oauth_token:
             env["CLAUDE_CODE_OAUTH_TOKEN"] = config.claude_code_oauth_token

@@ -14,8 +14,13 @@ def settings():
 
 def job(**kw):
     base = {
-        "id": "1", "job_type": "hourly", "budget_min": None, "budget_max": None,
-        "fixed_budget": None, "client_spend": 20000.0, "client_hours": 1000.0,
+        "id": "1",
+        "job_type": "hourly",
+        "budget_min": None,
+        "budget_max": None,
+        "fixed_budget": None,
+        "client_spend": 20000.0,
+        "client_hours": 1000.0,
         "payment_verified": True,
     }
     base.update(kw)

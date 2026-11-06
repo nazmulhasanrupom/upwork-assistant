@@ -112,9 +112,7 @@ class ToolResult:
 
     @property
     def text(self) -> str:
-        return "\n".join(
-            str(c.get("text", "")) for c in self.content if c.get("type") == "text"
-        )
+        return "\n".join(str(c.get("text", "")) for c in self.content if c.get("type") == "text")
 
     def data(self) -> Any:
         """structuredContent if the tool sent it, else the text parsed as JSON, else the text."""

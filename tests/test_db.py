@@ -3,8 +3,18 @@ from app.db import MIGRATIONS_DIR, connect, current_version, init_db, migrate
 LATEST = max(int(p.name.split("_")[0]) for p in MIGRATIONS_DIR.glob("*.sql"))
 
 SPEC_TABLES = {
-    "settings", "jobs", "skills_seen", "judgements", "drafts", "approvals",
-    "invites", "messages", "runs", "claude_calls", "emails", "schema_version",
+    "settings",
+    "jobs",
+    "skills_seen",
+    "judgements",
+    "drafts",
+    "approvals",
+    "invites",
+    "messages",
+    "runs",
+    "claude_calls",
+    "emails",
+    "schema_version",
 }
 
 

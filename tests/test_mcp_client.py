@@ -139,9 +139,7 @@ def router():
 
 
 def make(settings, conn, ft, oauth=None, run_id=None):
-    return UpworkMCP(
-        settings, oauth or FakeOAuth(), conn, run_id, sleep=ft.sleep, clock=ft.clock
-    )
+    return UpworkMCP(settings, oauth or FakeOAuth(), conn, run_id, sleep=ft.sleep, clock=ft.clock)
 
 
 def new_run(conn, run_id="r1"):

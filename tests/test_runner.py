@@ -193,3 +193,22 @@ def test_claude_calls_has_created_at_column(conn):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(claude_calls)")}
     assert "created_at" in cols
     assert isinstance(conn, sqlite3.Connection)
+
+
+def test_judge_run_uses_claude_config_dir_but_no_upwork_tools(
+    config, conn, prompt, fake_claude, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    log = tmp_path / "call.json"
+    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
+    call(config, conn, prompt)
+    seen = json.loads(log.read_text())
+    assert seen["config_dir"] == str(tmp_path / "cfg")
+    argv = seen["argv"]
+    assert "--strict-mcp-config" in argv  # only the empty MCP config, so no Upwork tools
+    assert argv[argv.index("--mcp-config") + 1].endswith("empty-mcp.json")
+
+
+def test_config_dir_defaults_to_data_claude(config, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    assert runner.claude_env(config)["CLAUDE_CONFIG_DIR"] == str(config.data_dir / "claude")

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import sqlite3
 import subprocess
@@ -32,6 +31,7 @@ from app.llm.runner import (
     ClaudeFailed,
     ClaudeRateLimited,
     check_monthly_cap,
+    claude_config_dir,
     claude_env,
     looks_rate_limited,
     save_call,
@@ -295,11 +295,7 @@ class ClaudeUpworkBridge:
         self.close()
 
     def config_dir(self) -> Path:
-        configured = str(self.settings.get("claude.config_dir") or "").strip()
-        if configured:
-            return Path(configured)
-        env = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-        return Path(env) if env else self.config.data_dir / "claude"
+        return claude_config_dir(self.config, self.settings)
 
     @property
     def calls_made(self) -> int:

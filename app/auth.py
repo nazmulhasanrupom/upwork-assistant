@@ -268,9 +268,7 @@ class Session:
 
 
 def serializer(secret_key: str) -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(
-        crypto.derive_key(secret_key, "session").hex(), salt="ua-session"
-    )
+    return URLSafeTimedSerializer(crypto.derive_key(secret_key, "session").hex(), salt="ua-session")
 
 
 def load_session(request: Request) -> Session:
@@ -282,9 +280,7 @@ def load_session(request: Request) -> Session:
     if raw:
         hours = request.app.state.settings.get("security.session_hours")
         try:
-            data = serializer(request.app.state.config.secret_key).loads(
-                raw, max_age=hours * 3600
-            )
+            data = serializer(request.app.state.config.secret_key).loads(raw, max_age=hours * 3600)
             if isinstance(data, dict):
                 session = Session(data)
         except BadSignature:

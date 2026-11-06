@@ -99,10 +99,18 @@ def test_setup_rejects_weak_or_mismatched_password(config):
     _, client = make_client(config)
     token = csrf_from(client.get("/setup/admin").text)
     base = {"username": USER, "csrf_token": token, "setup_code": client.setup_code}
-    assert client.post("/setup/admin", data={**base, "password": "short", "password2": "short"}
-                       ).status_code == 400
-    assert client.post("/setup/admin", data={**base, "password": PASSWORD, "password2": "other"}
-                       ).status_code == 400
+    assert (
+        client.post(
+            "/setup/admin", data={**base, "password": "short", "password2": "short"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/setup/admin", data={**base, "password": PASSWORD, "password2": "other"}
+        ).status_code
+        == 400
+    )
 
 
 def test_setup_wrong_totp_creates_nothing(config):
@@ -246,8 +254,12 @@ def test_login_without_csrf_is_403(env):
     client.get("/login")  # now there is a session, but the token is still missing or wrong
     r = client.post(
         "/login",
-        data={"username": USER, "password": PASSWORD, "code": pyotp.TOTP(secret).now(),
-              "csrf_token": "wrong"},
+        data={
+            "username": USER,
+            "password": PASSWORD,
+            "code": pyotp.TOTP(secret).now(),
+            "csrf_token": "wrong",
+        },
     )
     assert r.status_code == 403
 
