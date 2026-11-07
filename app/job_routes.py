@@ -20,9 +20,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import auto_send, auto_send_flow, proposal_rules
+from app import auto_send, auto_send_flow, connects, proposal_rules
 from app import job_actions as ja
 from app.llm import prompting
+from app.llm.live import ClaudeCancelled
 from app.llm.runner import ClaudeError
 from app.pages import job_page
 from app.upwork import writes
@@ -182,6 +183,19 @@ def _make_bridge(factory: Any, config: Any, ctx: Any) -> Any:
 
 def _make_writer(config: Any, ctx: Any) -> writes.ClaudeUpworkWriter:
     return writes.ClaudeUpworkWriter(config, ctx.settings, ctx.conn)
+
+
+def _refresh_connects(state: Any, config: Any, ctx: Any) -> None:
+    """After a send: read the new Connects balance. A failure here never changes the send."""
+    bridge = None
+    try:
+        bridge = _make_bridge(getattr(state, "mcp_factory", None), config, ctx)
+        connects.refresh_quietly(bridge, ctx.conn, ctx.settings)
+    except (Exception, ClaudeCancelled):
+        log.warning("Connects refresh after a send failed", exc_info=True)
+    finally:
+        if bridge is not None:
+            _close(bridge)
 
 
 def _set_status_conn(conn: Any, job_id: str, status: str, only_from: tuple[str, ...]) -> None:
@@ -412,6 +426,7 @@ def approve(request: Request, job_id: str, preview: int = Form(0)) -> Response:
             _set_status_conn(
                 ctx.conn, job_id, "sent", ("prepared", "candidate", "judged", "drafted", "seen")
             )
+            _refresh_connects(s, config, ctx)
             return _outcome(job_id, "sent")
         raise WorkerError(result.message or "Upwork did not accept it. Nothing was sent.")
 

@@ -44,6 +44,10 @@ description_max_chars = 3000   # job text sent on to Claude is cut to this
 review_comment_chars = 200     # client review comments are cut to this
 max_reviews = 5                # latest client reviews kept per job
 
+[manual]                  # plan M1: add a job by hand
+search_limit = 10               # rows asked when you search by title words
+max_input_chars = 300           # longest text accepted in the Add a job box
+
 [activity]                # plan F1: job activity filter (app/filters/activity.py)
 hide_age_hours = 48             # older than this counts as old
 fresh_hours = 24                # newer than this counts as fresh

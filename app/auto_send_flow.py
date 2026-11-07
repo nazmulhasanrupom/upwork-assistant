@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from app import auto_send, mail, proposal_rules
+from app import auto_send, connects, mail, proposal_rules
 from app import job_actions as ja
 from app.config import Config
 from app.llm.live import ClaudeCancelled
@@ -352,6 +352,7 @@ def _deliver(conn, config, settings, row, by, make_click, reader, writer, now) -
         conn, config, settings, row_id, "auto_send_sent", "Proposal sent",
         [f"Sent on Upwork because {who}.", "", "The proposal:", *_lines(letter)], now,
     )  # fmt: skip
+    connects.refresh_quietly(reader, conn, settings)  # last: a failure only logs
     return Outcome("sent", "Sent to Upwork.")
 
 

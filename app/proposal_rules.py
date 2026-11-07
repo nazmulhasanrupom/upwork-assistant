@@ -62,8 +62,12 @@ def check(text: str | None) -> list[str]:
     marks = sorted({c for c in text if c in "#`[]~|" or (c == "_" and "__" not in text)})
     if marks:
         problems.append(f"Has markdown characters: {' '.join(marks)}. Use plain words.")
-    if _BULLET_RE.search(text):
-        problems.append("Has a list (bullets or numbers at line start). Write sentences.")
+    items = [m.group(0) + text[m.end() :].split("\n", 1)[0] for m in _BULLET_RE.finditer(text)]
+    if len(items) >= 2:  # one line that starts with a number or dash is not a list
+        shown = _sample([" ".join(i.split())[:40] for i in items], 2)
+        problems.append(
+            f"Has a list (lines that start with a dash or number): {shown}. Write sentences."
+        )
     if _EMOJI_RE.search(text):
         problems.append("Has an emoji or symbol picture. Use words only.")
     urls = [m.group(0) for m in _URL_RE.finditer(text)]

@@ -22,12 +22,13 @@
 {%- endmacro %}
 
 {# kind: "" | warn | bad | good. value is the big number. #}
-{% macro stat(label, value, hint="", kind="", id="", delta="", help_key="") -%}
+{% macro stat(label, value, hint="", kind="", id="", delta="", help_key="", extra="") -%}
 <div class="stat{% if kind %} {{ kind }}{% endif %}"{% if id %} id="{{ id }}"{% endif %}>
   <div class="stat-label">{{ label }}{% if help_key %}{{ info(help_key) }}{% endif %}</div>
   <div class="stat-value"><strong>{{ value }}</strong>{% if kind == "warn" %} {{ pill("Low", "warn") }}{% endif %}</div>
   {% if delta %}{% set up = not (delta | string).startswith("-") %}<div class="stat-delta {{ 'up' if up else 'down' }}">{{ icon("trending-up") if up else "" }}{{ delta }}</div>{% endif %}
   {% if hint %}<div class="stat-hint">{{ hint }}</div>{% endif %}
+  {% if extra %}<div class="stat-extra">{{ extra }}</div>{% endif %}
 </div>
 {%- endmacro %}
 
@@ -141,4 +142,13 @@
 {%- else -%}
 <span class="action-status" id="action-{{ a.id }}" role="alert"><span class="pill bad">{{ "Stopped" if a.status == "stopped" else "Failed" }}</span> <span class="small">{{ a.error or "Something went wrong." }}</span></span>
 {%- endif -%}
+{%- endmacro %}
+
+{# Small Refresh button for the Connects number. next: a local path to come back to. #}
+{% macro connects_refresh(csrf, next="/") -%}
+<form method="post" action="/connects/refresh" class="inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  {{ button("Refresh", "ghost", small=true, icon_name="refresh") }}{{ info("connects.refresh") }}
+</form>
 {%- endmacro %}

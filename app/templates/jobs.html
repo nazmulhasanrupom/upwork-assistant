@@ -3,6 +3,7 @@
 {% block title %}Jobs{% endblock %}
 {% block content %}
 {% call page_header("Jobs", "jobs.score") %}
+  {{ button("Add a job", "secondary", href="/jobs/add", icon_name="plus") }}
   <span class="muted small" id="jobs-count">{{ total }} job(s) &middot; Page {{ page }} of {{ pages }}</span>
 {% endcall %}
 {{ jobs_tabs("/jobs") }}

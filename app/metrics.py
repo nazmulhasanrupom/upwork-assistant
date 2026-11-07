@@ -362,6 +362,11 @@ def snapshot(
     except Exception as e:
         raise MetricsError(f"The dashboard read failed: {type(e).__name__}: {e}"[:300]) from e
 
+    if dash["connects"] is not None:
+        from app import connects  # late import: connects uses this module
+
+        connects.record(conn, dash["connects"], "metrics")
+
     jss: float | None = None
     if want_jss and key is not None:
         try:

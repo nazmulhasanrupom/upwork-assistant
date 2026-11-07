@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import approvals, auto_send, charts, job_actions, markdown_lite
+from app import approvals, auto_send, charts, job_actions, markdown_lite, proposal_rules
 from app import costs as cost_totals
 from app import metrics as metrics_data
 from app import rank as rank_data
@@ -25,7 +25,7 @@ from app.filters import activity as act
 from app.llm import prompting
 from app.tasks import lock, trigger
 from app.upwork.jobs import CLOSE_TAG, OPEN_TAG
-from app.worker import safe_local_url
+from app.worker import WorkerError, safe_local_url
 
 router = APIRouter()
 
@@ -359,6 +359,34 @@ def run_task(request: Request, name: str) -> Response:
     return RedirectResponse(f"/?msg={outcome}", status_code=303)
 
 
+@router.post("/connects/refresh")
+def refresh_connects(request: Request, next: str = Form("/")) -> Response:
+    """Read the Connects balance now (one read call, on the worker). Login + CSRF are checked
+    by the app-wide guard."""
+    from app import connects
+    from app.upwork.bridge import ClaudeUpworkBridge
+
+    s = request.app.state
+    back = safe_local_url(next) or "/"
+    factory = getattr(s, "mcp_factory", None)
+
+    def work(ctx: Any) -> tuple[str, str]:
+        bridge = factory() if factory else ClaudeUpworkBridge(s.config, ctx.settings, ctx.conn)
+        try:
+            balance = connects.refresh(bridge, ctx.conn, ctx.settings)
+        except connects.ConnectsError as exc:
+            raise WorkerError(str(exc)) from exc
+        finally:
+            getattr(bridge, "close", lambda: None)()
+        return back, f"Connects balance: {balance}."
+
+    action_id = s.worker.submit(
+        "connects_refresh", "connects", "Reading the Connects balance", work, "connects_refresh"
+    )
+    sep = "&" if "?" in back else "?"
+    return RedirectResponse(f"{back}{sep}action={action_id}", status_code=303)
+
+
 @router.post("/safety/jss-guard/clear")
 def clear_jss_guard(request: Request) -> Response:
     """The owner clears the JSS guard by hand (nothing in the code ever does). Login + CSRF are
@@ -616,13 +644,22 @@ def judgement_view(row: sqlite3.Row | None) -> dict[str, Any] | None:
 def draft_view(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
+    answers = _json(row["answers"], [])
+    # Checked again on every view, so a fixed rule clears drafts saved before the fix.
+    problems = (
+        proposal_rules.check_draft(
+            row["cover_letter"], answers if isinstance(answers, list) else []
+        )
+        if row["rules_ok"] is not None
+        else []
+    )
     return {
         **dict(row),
-        "answer_list": _json(row["answers"], []),
+        "answer_list": answers,
         "material_list": _json(row["materials"], []),
         "flag_list": _json(row["flags"], []),
-        "rules_broken": row["rules_ok"] == 0,
-        "rules_list": _json(row["rules_problems"], []),
+        "rules_broken": bool(problems),
+        "rules_list": problems,
         "length": len(row["cover_letter"] or ""),
     }
 

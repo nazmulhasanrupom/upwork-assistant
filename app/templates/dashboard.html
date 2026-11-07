@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import flash, stat, button, card, page_header, pill, icon, info, empty %}
+{% from "_macros.html" import flash, stat, button, card, page_header, pill, icon, info, empty , connects_refresh %}
 {% block title %}Home{% endblock %}
 {% block content %}
 {% set ns = namespace(last="") %}
@@ -49,9 +49,9 @@
   {{ stat("Waiting in To do", waiting, "", "", "stat-waiting", help_key="dashboard.waiting") }}
   {% if connects %}
   {% set hint %}{% if connects.needed is not none %}Top job needs {{ connects.needed }}. {% endif %}Seen {{ connects.seen_at | dt }}{% endset %}
-  {{ stat("Connects left", connects.balance, hint, "warn" if low_connects else "", "connects", help_key="dashboard.connects") }}
+  {{ stat("Connects left", connects.balance, hint, "warn" if low_connects else "", "connects", help_key="dashboard.connects", extra=connects_refresh(csrf_token, "/")) }}
   {% else %}
-  {{ stat("Connects left", "-", "No Connects balance seen yet.", "", "connects", help_key="dashboard.connects") }}
+  {{ stat("Connects left", "-", "No Connects balance seen yet.", "", "connects", help_key="dashboard.connects", extra=connects_refresh(csrf_token, "/")) }}
   {% endif %}
   {% if costs %}
   {% set cost_hint %}Week ${{ "%.2f"|format(costs.week) }}, month ${{ "%.2f"|format(costs.month) }} of ${{ "%.0f"|format(costs.cap) }} cap ({{ costs.percent }}%){% endset %}

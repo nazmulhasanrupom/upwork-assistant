@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_macros.html" import action_status, button, flash, pill, info, page_header, empty %}
+{% block title %}Add a job{% endblock %}
+{% block content %}
+{% call page_header("Add a job", "jobs.add") %}
+  {{ button("Back to Jobs", "secondary", href="/jobs") }}
+{% endcall %}
+
+{% if action_id %}<div class="action-line" id="add-action">{{ action_status(action_id) }}</div>{% endif %}
+{% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
+
+<form method="post" action="/jobs/add" class="filters filter-bar" id="add-job-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label class="field"><span>Job link, job id or title words</span>
+    <input type="text" name="text" value="{{ text }}" maxlength="{{ max_chars }}" required autofocus>
+  </label>
+  {{ button("Find and add", "primary") }}
+</form>
+
+{% if found is not none %}
+  {% if found %}
+  <table class="table" id="add-found">
+    <thead><tr><th>Title</th><th>Posted</th><th>Budget</th><th>Proposals</th><th></th></tr></thead>
+    <tbody>
+    {% for r in found %}
+      <tr>
+        <td>{{ r.title }}</td>
+        <td>{{ r.posted }}</td>
+        <td>{{ r.budget }}</td>
+        <td>{{ r.proposals }}</td>
+        <td>
+          {% if r.known %}{{ pill("In Jobs already", "ok") }} <a class="small" href="/jobs/{{ r.id }}">Open</a>
+          {% else %}
+          <form method="post" action="/jobs/add" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="job_id" value="{{ r.id }}">
+            <input type="hidden" name="found" value="{{ found_id }}">
+            {{ button("Add", "secondary", small=true) }}
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  {{ empty("search", "No jobs found. Try other words, or paste the job link.") }}
+  {% endif %}
+{% endif %}
+{% endblock %}

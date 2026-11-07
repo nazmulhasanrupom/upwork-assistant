@@ -219,10 +219,16 @@ class _Runner:
 def _pending_judge(conn: sqlite3.Connection, fresh_ids: set[str], cutoff: str) -> list[sqlite3.Row]:
     rows = conn.execute(
         "SELECT j.* FROM jobs j LEFT JOIN judgements g ON g.job_id = j.job_id "
-        "WHERE g.job_id IS NULL AND j.status = 'candidate' AND j.tier IN ('HIGH','MID') "
+        "WHERE g.job_id IS NULL AND j.status = 'candidate' "
         f"ORDER BY {TIER_SQL}, j.rate_paid DESC"
     ).fetchall()
-    return [r for r in rows if r["job_id"] in fresh_ids or (r["first_seen"] or "") >= cutoff]
+    # A job in fresh_ids is judged at any tier (a job the owner added by hand can be LOW).
+    return [
+        r
+        for r in rows
+        if r["job_id"] in fresh_ids
+        or (r["tier"] in ("HIGH", "MID") and (r["first_seen"] or "") >= cutoff)
+    ]
 
 
 def _pending_write(conn: sqlite3.Connection, fit_min: int, cutoff: str) -> list[sqlite3.Row]:

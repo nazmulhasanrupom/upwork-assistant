@@ -20,6 +20,7 @@ from tests.test_auth import csrf_from, setup_admin
 from tests.test_auth import make_client as make_web_client
 from tests.test_h2_job_actions import FakeReader as BaseReader
 from tests.test_writes import JOB, ORG, SENT_JOB
+from tests.upwork_fakes import load, to_result
 
 LETTER = "Your CRM and billing do not talk to each other. I build the n8n sync that fixes it."
 JOB2 = "4000000000000000777"
@@ -533,3 +534,184 @@ def test_the_write_prompt_carries_no_rule_text():
         "confirm_preview", {"action": "confirm", "org_uid": "1", "params": {}}
     )
     assert "without my approval" not in prompt and "Never send" not in prompt
+
+
+# ------------------------------------------------------------------ N1: Connects stay fresh
+
+
+DASH_BALANCE = 3  # connects.balance.connectsBalance in the dashboard fixture
+
+
+class DashReader(Reader):
+    """Also answers the dashboard read; `fail` makes that read raise."""
+
+    fail = False
+    dash_calls = 0
+
+    def call_many(self, calls):
+        if calls and calls[0][0] == "get_freelancer_dashboard":
+            type(self).dash_calls += 1
+            if type(self).fail:
+                raise RuntimeError("boom")
+            return [to_result(t, load("freelancer_dashboard.json")) for t, _ in calls]
+        return super().call_many(calls)
+
+
+@pytest.fixture(autouse=True)
+def reset_dash():
+    DashReader.fail, DashReader.dash_calls = False, 0
+
+
+def latest_balance(conn):
+    return conn.execute("SELECT balance FROM connects ORDER BY id DESC LIMIT 1").fetchone()[0]
+
+
+def test_refresh_parses_and_stores(conn, settings):
+    from app import connects
+
+    assert connects.refresh(DashReader(), conn, settings, "r1") == DASH_BALANCE
+    got = conn.execute("SELECT * FROM connects ORDER BY id DESC").fetchone()
+    assert got["balance"] == DASH_BALANCE and got["needed"] is None and got["run_id"] == "r1"
+
+
+def test_refresh_errors_are_safe(conn, settings):
+    from app import connects
+
+    DashReader.fail = True
+    with pytest.raises(connects.ConnectsError):
+        connects.refresh(DashReader(), conn, settings)
+    assert connects.refresh_quietly(DashReader(), conn, settings) is None
+    settings.set("upwork.talent_org_uid", "")
+    with pytest.raises(connects.ConnectsError):
+        connects.refresh(DashReader(), conn, settings)
+
+
+def test_record_ignores_no_number(conn):
+    from app import connects
+
+    assert connects.record(conn, None) is False
+    assert connects.record(conn, 7, "test") is True and latest_balance(conn) == 7
+
+
+def test_preview_records_its_balance(conn, settings, config, writer):
+    seed(conn)
+    FakeWriter.balance = 33
+    start(conn, settings, config, writer)
+    assert latest_balance(conn) == 33
+
+
+def test_metrics_snapshot_records_balance(conn, settings):
+    from datetime import UTC, datetime
+
+    from app import metrics
+
+    metrics.snapshot(DashReader(), conn, settings, datetime(2026, 11, 6, 12, tzinfo=UTC))
+    assert latest_balance(conn) == DASH_BALANCE
+
+
+def test_auto_send_refreshes_after_the_send(conn, settings, config, writer, emails):
+    seed(conn)
+    start(conn, settings, config, writer)
+    make_due(conn, 1)
+    assert run(conn, settings, config, writer, DashReader()) == ["1: sent (Sent to Upwork.)"]
+    assert DashReader.dash_calls == 1 and latest_balance(conn) == DASH_BALANCE
+
+
+def test_refresh_failure_does_not_fail_the_auto_send(conn, settings, config, writer, emails):
+    seed(conn)
+    start(conn, settings, config, writer)
+    make_due(conn, 1)
+    DashReader.fail = True
+    assert run(conn, settings, config, writer, DashReader()) == ["1: sent (Sent to Upwork.)"]
+    assert row(conn)["status"] == "sent"
+
+
+def test_approve_route_refreshes_after_the_send(web):
+    app, client = web
+    app.state.mcp_factory = lambda: DashReader()
+    post(client, f"/jobs/{JOB}/approve", preview=1)
+    assert row(app.state.db)["status"] == "sent"
+    assert DashReader.dash_calls == 1 and latest_balance(app.state.db) == DASH_BALANCE
+
+
+def test_approve_route_survives_a_refresh_failure(web):
+    app, client = web
+    DashReader.fail = True
+    app.state.mcp_factory = lambda: DashReader()
+    post(client, f"/jobs/{JOB}/approve", preview=1)
+    assert row(app.state.db)["status"] == "sent"
+
+
+def test_refresh_button_queues_one_action_and_goes_back(web):
+    app, client = web
+    app.state.mcp_factory = lambda: DashReader()
+    html = client.get("/").text
+    assert "/connects/refresh" in html
+    r = post(client, "/connects/refresh", next=f"/jobs/{JOB}")
+    assert r.status_code == 200
+    assert DashReader.dash_calls == 1 and latest_balance(app.state.db) == DASH_BALANCE
+    token = csrf_from(client.get("/approvals").text)
+    r = client.post("/connects/refresh", data={"csrf_token": token, "next": "//evil.example"})
+    assert r.headers["location"].startswith("/?action=")
+
+
+@pytest.mark.parametrize("kind", ["error", "cancel"])
+def test_refresh_cancel_or_error_cannot_change_a_manual_send(web, monkeypatch, kind):
+    from app import connects
+    from app.llm.live import ClaudeCancelled
+
+    exc = RuntimeError("x") if kind == "error" else ClaudeCancelled()
+    app, client = web
+
+    def boom(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(connects, "refresh", boom)
+    post(client, f"/jobs/{JOB}/approve", preview=1)
+    assert row(app.state.db)["status"] == "sent"
+
+
+def test_refresh_cancel_does_not_skip_sent_bookkeeping(
+    conn, settings, config, writer, emails, monkeypatch
+):
+    from app import connects
+    from app.llm.live import ClaudeCancelled
+
+    monkeypatch.setattr(
+        connects, "refresh", lambda *a, **k: (_ for _ in ()).throw(ClaudeCancelled())
+    )
+    seed(conn)
+    start(conn, settings, config, writer)
+    make_due(conn, 1)
+    assert run(conn, settings, config, writer) == ["1: sent (Sent to Upwork.)"]
+    assert conn.execute("SELECT status FROM jobs WHERE job_id = ?", (JOB,)).fetchone()[0] == "sent"
+    assert "auto_send_sent" in [e["event"] for e in emails]
+
+
+def test_connects_errors_and_dedup(conn, settings, web):
+    from app import connects
+
+    class NoBalance:
+        def call_many(self, calls):
+            return [to_result(t, {"data": {}}) for t, _ in calls]
+
+    with pytest.raises(connects.ConnectsError):
+        connects.refresh(NoBalance(), conn, settings)
+    app, client = web
+    app.state.worker.sync = False
+    import threading
+
+    gate = threading.Event()
+
+    def slow():
+        gate.wait(5)
+        return DashReader()
+
+    app.state.mcp_factory = slow
+    token = csrf_from(client.get("/approvals").text)
+    ids = {
+        client.post("/connects/refresh", data={"csrf_token": token}).headers["location"]
+        for _ in range(2)
+    }
+    gate.set()
+    assert len(ids) == 1

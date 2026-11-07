@@ -20,6 +20,7 @@
 "dashboard.profile_views" = "Upwork shows no number we can read. Look at your profile stats once a week and type it here."
 "dashboard.runs" = "The last run of each background task, with a Run now button for each."
 "dashboard.connects" = "Connects left on your account. It is read when the daily task fetches a job."
+"connects.refresh" = "Asks Upwork for your Connects balance now (a read only call). It also updates after each send."
 "dashboard.cost" = "What Claude cost this month, against the monthly cap you set."
 "dashboard.good_jobs" = "Jobs rated HIGH or MID that appeared since midnight."
 "dashboard.waiting" = "Items in the To do list that wait for your click."
@@ -122,3 +123,4 @@
 "auto_send.countdown" = "This proposal is rated excellent. Sends on Upwork automatically when the timer ends. Approve sends it now. Stop cancels it. The server clock is the truth, not this page."
 "auto_send.system" = "If you do nothing, the app confirms the proposal itself. This is recorded as the system, not you. It never sends while dry-run or the kill switch is on."
 "auto_send.card" = "A proposal is waiting to be sent by the app. Open it to read the text, then Approve or Stop."
+"jobs.add" = "Paste a job link, a job id or a few title words. The job is saved, judged and drafted even if a filter would have dropped it. Nothing is sent."

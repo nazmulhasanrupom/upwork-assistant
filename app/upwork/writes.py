@@ -778,6 +778,10 @@ def _make_preview(
     )
     ok = not res.is_error and preview_id is not None and can_apply is not False
     status = "previewed" if ok else "failed"
+    if balance is not None:
+        from app import connects  # late import: connects uses metrics, not this module
+
+        connects.record(conn, balance, "preview", call.run_id)
     message = ""
     if res.is_error:
         message = res.text.strip()[:300] or "The preview failed."

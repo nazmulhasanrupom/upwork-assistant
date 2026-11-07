@@ -28,6 +28,7 @@ from app.job_routes import router as job_router
 from app.learning_routes import router as learning_router
 from app.live_routes import router as live_router
 from app.llm import live
+from app.manual_routes import router as manual_router
 from app.pages import install_filters
 from app.pages import router as pages_router
 from app.playbook_routes import router as playbook_router
@@ -232,6 +233,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(context_router)
     app.include_router(runs_router)
     app.include_router(review_router)
+    app.include_router(manual_router)
     app.include_router(job_router)
     app.include_router(chat_router)
     app.include_router(approvals_router)

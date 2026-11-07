@@ -50,7 +50,7 @@ def test_clean_text_passes(text):
         ("See [this](x) ok", "markdown"),
         ("- one\n- two", "list"),
         ("1. one\n2. two", "list"),
-        ("• one", "list"),
+        ("• one\n• two", "list"),
         ("Hello <b>there</b>", "HTML"),
         ("a > b", "HTML"),
         ("𝗕𝗼𝗹𝗱 letters", "bold"),
@@ -176,11 +176,20 @@ def test_prompts_carry_the_rules():
 def test_page_warns_when_the_draft_breaks_the_rules(web):  # noqa: F811
     app, client = web
     app.state.db.execute(
-        "UPDATE drafts SET rules_ok = 0, rules_problems = ? WHERE job_id = ?",
-        (json.dumps(['Cover letter: Has a link or URL: "x.com". Remove it.']), JOB),
+        "UPDATE drafts SET rules_ok = 0, cover_letter = ? WHERE job_id = ?",
+        ("See https://x.com now.", JOB),
     )
     html = page(client).text
     assert "breaks the proposal rules" in html and "Has a link or URL" in html
+
+
+def test_page_clears_an_old_saved_error_when_the_text_is_clean(web):  # noqa: F811
+    app, client = web
+    app.state.db.execute(
+        "UPDATE drafts SET rules_ok = 0, rules_problems = ?, cover_letter = ? WHERE job_id = ?",
+        (json.dumps(["Cover letter: Has a list"]), "Hi.\n3. Python for 8 years.", JOB),
+    )
+    assert "breaks the proposal rules" not in page(client).text
 
 
 def test_page_has_no_warning_for_a_clean_or_unchecked_draft(web):  # noqa: F811
@@ -200,3 +209,13 @@ def test_manual_edit_rechecks_the_rules(web):  # noqa: F811
     row = app.state.db.execute("SELECT * FROM drafts WHERE job_id = ?", (JOB,)).fetchone()
     assert row["rules_ok"] == 1 and json.loads(row["rules_problems"]) == []
     assert seed  # imported for the fixture module
+
+
+def test_one_line_that_starts_with_a_number_is_not_a_list():
+    assert not pr.check("I can start today.\n3. Python is my main tool, used for 8 years.")
+    assert not pr.check("Hello,\n- I read your post.")
+
+
+def test_list_message_shows_the_lines():
+    [msg] = pr.check("Plan:\n1. Fix the bot\n2. Add tests")
+    assert "1. Fix the bot" in msg and "2. Add tests" in msg

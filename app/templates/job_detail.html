@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import action_status, badge, pill, chips, button, card, flash, copy_button, info, icon %}
+{% from "_macros.html" import action_status, badge, pill, chips, button, card, flash, copy_button, info, icon , connects_refresh %}
 {% from "_auto_send.html" import auto_card %}
 {% block title %}{{ job.title or job.job_id }}{% endblock %}
 {# A write button in its own form. Why it is off goes in the "i" next to it (not a tooltip on a disabled button, which never gets hover). #}
@@ -186,7 +186,7 @@
     {% else %}
     <dl class="kv" id="connects-facts">
       <div><dt>Connects cost</dt><dd>{{ job.connects_cost if job.connects_cost is not none else "n/a" }}</dd></div>
-      <div><dt>Connects balance</dt><dd>{{ connects_balance if connects_balance is not none else "n/a" }}</dd></div>
+      <div><dt>Connects balance</dt><dd>{{ connects_balance if connects_balance is not none else "n/a" }} {{ connects_refresh(csrf_token, "/jobs/" ~ job.job_id) }}</dd></div>
     </dl>
     {% endif %}
 
