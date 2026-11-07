@@ -208,9 +208,24 @@ def parse_stream(stdout: str) -> Stream:
     return st
 
 
+def whole_numbers(value: Any) -> Any:
+    """A float with no fraction becomes an int (25.0 -> 25), all the way down. Claude writes a
+    whole number without ".0", so this keeps the exact-match check from failing on it."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: whole_numbers(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [whole_numbers(v) for v in value]
+    return value
+
+
 def _canon(value: Any) -> str:
-    """JSON round trip, then a stable text form, so {"a": 1} equals {"a": 1} only."""
-    return json.dumps(json.loads(json.dumps(value)), sort_keys=True, separators=(",", ":"))
+    """JSON round trip, then a stable text form, so {"a": 1} equals {"a": 1} only.
+    A whole float equals its int (25.0 == 25); text must match exactly."""
+    return json.dumps(
+        whole_numbers(json.loads(json.dumps(value))), sort_keys=True, separators=(",", ":")
+    )
 
 
 def _text_of(content: list[dict[str, Any]]) -> str:

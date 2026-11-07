@@ -60,6 +60,7 @@ from app.upwork.bridge import (
     match_results,
     needs_login,
     parse_stream,
+    whole_numbers,
 )
 from app.upwork.client import ToolResult, UpworkAuthError, UpworkMCPError
 
@@ -269,7 +270,7 @@ def issue_system_click(
 
 
 def _canon_json(value: Any) -> Any:
-    return json.loads(json.dumps(value))
+    return whole_numbers(json.loads(json.dumps(value)))
 
 
 def check_write_call(tool: str, args: dict[str, Any]) -> None:

@@ -488,3 +488,27 @@ def test_daily_survives_one_skipped_detail(
     assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 7  # one job left for later
     note = next((config.data_dir / "memory" / "daily").glob("*.md")).read_text()
     assert "tool error on job" in note and "did not make this call" in note
+
+
+def test_whole_float_matches_claude_int():
+    # The app keeps a rate as 25.0; Claude writes 25. That is the same call, not a missing one.
+    from app.upwork.bridge import MCP_PREFIX, Stream, match_results
+
+    st = Stream()
+    st.uses.append(
+        {
+            "id": "u1",
+            "name": MCP_PREFIX + "manage_proposals",
+            "input": {"action": "create", "params": {"charged_amount": 25, "cover_letter": "Hi"}},
+        }
+    )
+    st.results["u1"] = {"is_error": False, "content": [{"type": "text", "text": "{}"}]}
+    want = {"action": "create", "params": {"charged_amount": 25.0, "cover_letter": "Hi"}}
+    [res] = match_results([("manage_proposals", want)], st)
+    assert not res.is_error
+    changed = {"action": "create", "params": {"charged_amount": 25.5, "cover_letter": "Hi"}}
+    [res] = match_results([("manage_proposals", changed)], st)
+    assert res.is_error and res.error_kind == "missing"  # a real change still fails
+    text = {"action": "create", "params": {"charged_amount": 25, "cover_letter": "Hi!"}}
+    [res] = match_results([("manage_proposals", text)], st)
+    assert res.is_error  # text must match exactly

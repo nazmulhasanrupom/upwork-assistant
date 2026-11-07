@@ -116,7 +116,7 @@
 "chat.readonly" = "Read-only. It never writes to Upwork, sends or approves. It has no tools, only fixed lookups. The daily cost cap is in Settings."
 "settings.auto_send.enabled" = "Owner-approved. When on and dry-run is off, a great job starts a countdown, then the app sends the proposal itself unless you click Stop."
 "settings.auto_send.wait_minutes" = "How long you have to click Stop before the proposal is sent by the app."
-"job.rules" = "Every draft must be plain text: no bold, markdown, emoji, links, web-address words or dashes. Fix it by hand. A draft that breaks the rules is never auto-sent."
+"job.rules" = "Every draft must be plain text: no bold, markdown, lists, emoji, links, web-address words or dashes. Fix it by hand. A draft that breaks the rules is never auto-sent."
 "settings.auto_send.max_highlights" = "How many portfolio or work history items the app adds to a proposal it sends by itself. 0 adds none."
 "settings.auto_send.check_minutes" = "How often the app looks for countdowns that have ended. The scheduler ticks every 5 minutes, so a smaller number does not make it faster."
 "auto_send.countdown" = "This proposal is rated excellent. Sends on Upwork automatically when the timer ends. Approve sends it now. Stop cancels it. The server clock is the truth, not this page."
