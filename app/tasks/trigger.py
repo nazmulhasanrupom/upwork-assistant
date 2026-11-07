@@ -31,6 +31,8 @@ MANUAL_TASKS = (
 )  # started by a button (KW1, O3, L4, L5)
 # also started by the scheduler: profile_test when due (O3); consolidate, research weekly (L4, L5)
 SCHEDULED_MANUAL = ("profile_test", "consolidate", "research")
+# only the scheduler starts these (no button): the auto-send countdown check (round 3, A2)
+SCHEDULED_ONLY = ("auto_send",)
 PACKAGE = "app.tasks"  # tests point this at a fake package
 ROOT = Path(__file__).resolve().parent.parent.parent  # /app in the image
 
@@ -41,7 +43,7 @@ class NotBuilt(Exception):
 
 def is_built(name: str) -> bool:
     """The module exists and has a main()."""
-    if name not in TASKS + MANUAL_TASKS:
+    if name not in TASKS + MANUAL_TASKS + SCHEDULED_ONLY:
         return False
     module_name = f"{PACKAGE}.{name}"
     try:
@@ -91,7 +93,7 @@ def start(config: Config, name: str) -> Path:
 def running(config: Config) -> dict[str, str]:
     """Tasks whose lock is held now: name -> start time (ISO, or '' if not written yet)."""
     out: dict[str, str] = {}
-    for name in TASKS + MANUAL_TASKS:
+    for name in TASKS + MANUAL_TASKS + SCHEDULED_ONLY:
         since = lock.running_since(config.data_dir, name)
         if since is not None:
             out[name] = since

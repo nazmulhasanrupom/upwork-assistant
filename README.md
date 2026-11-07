@@ -22,20 +22,22 @@ control: it never changes anything on Upwork without your click.
 
 ## Quick start
 
-1. Get a Claude token (`CLAUDE_CODE_OAUTH_TOKEN`) or an `ANTHROPIC_API_KEY`.
-2. Copy `.env.example` to `.env` and fill in the values.
-3. Run `docker compose up -d --build`.
-4. Open the panel and finish the `/setup` wizard.
+1. Run `docker compose up -d`.
+2. Open the URL (for example `http://localhost:8000`).
+3. Create your account (email and password).
+4. Follow the setup bar at the top. The Claude step shows how to get a token.
+
+No `.env` file is needed.
 
 Full guides: [Docker](docs/setup-docker.md), [Coolify](docs/setup-coolify.md).
 
-## Settings (environment)
+## Settings (environment, all optional)
 
 | Variable | Meaning |
 |---|---|
-| `PUBLIC_BASE_URL` | The URL you open the panel at |
-| `SECRET_KEY` | Long random string for sessions |
-| `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | How Claude is paid for |
+| `PUBLIC_BASE_URL` | The URL you open the panel at. Default: saved from your first visit |
+| `SECRET_KEY` | Default: made for you and kept in `/data/secret_key` |
+| `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` | Default: paste them on the Claude setup step. A value here wins |
 | `TZ` | Your time zone, e.g. `Europe/Berlin` |
 | `LOG_LEVEL` | `info` by default |
 | `DATA_DIR` | Data folder, `/data` in the image |

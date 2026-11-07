@@ -4,7 +4,8 @@
 - POST /settings/save/{section}     login + CSRF: typed, validated, saved to the settings table
 - POST /settings/toggle/{name}      login + CSRF: dry-run and kill switch
 - GET  /settings/export.json        login: settings and a data summary (no secrets, no tokens)
-- POST /settings/delete-all         login + CSRF: owner, typed phrase AND password or TOTP
+- POST /settings/delete-all         login + CSRF: owner, typed phrase AND password (+ code if on)
+- POST /settings/two-step/{start,enable,disable,skip}   optional 2-step login and its reminder
 
 Secrets are never shown, never exported and never saved here. Delete all data only touches
 files inside DATA_DIR (every path is resolved and checked first).
@@ -26,7 +27,7 @@ from croniter import croniter
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import auth, crypto
+from app import auth, base_url, claude_auth, crypto
 from app.auth_routes import render
 from app.help import load_help
 from app.settings_labels import key_label, section_title
@@ -40,6 +41,7 @@ SECRET_ENDINGS = ("password", "secret", "token", "_enc")
 # Written by the app, shown read-only. Edited on their own pages (Email, Upwork) or never by hand.
 READONLY_PREFIXES = ("scheduler.", "setup.done_steps", "setup.finished")
 READONLY_KEYS = {
+    "security.totp_reminder_skipped_at",
     "keywords.baseline_started",
     "safety.jss_guard_note",
     "email.gmail_address",
@@ -209,6 +211,14 @@ def _page(request: Request, status: int = 200, **ctx: Any) -> Response:
         dry_run=bool(st.get("general.dry_run")),
         kill_switch=bool(st.get("general.kill_switch")),
         phrase=CONFIRM_PHRASE,
+        two_step=_two_step(request),
+        claude_token_hint=claude_auth.hint(st, request.app.state.config, claude_auth.TOKEN_KEY),
+        claude_key_hint=claude_auth.hint(st, request.app.state.config, claude_auth.API_KEY),
+        claude_from_env=bool(
+            request.app.state.config.claude_code_oauth_token
+            or request.app.state.config.anthropic_api_key
+        ),
+        base_url=base_url.get_base_url(st, request.app.state.config),
         **ctx,
     )
 
@@ -272,7 +282,7 @@ def _tables(conn: sqlite3.Connection) -> list[str]:
 
 def data_summary(conn: sqlite3.Connection, data_dir: Path) -> dict[str, Any]:
     """Counts only. No row content, no file names, no tokens."""
-    skip = {"admin", "auth_state", "setup_code", "oauth_state"}
+    skip = {"admin", "auth_state", "oauth_state"}
     tables = {
         t: conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]  # noqa: S608
         for t in _tables(conn)
@@ -370,24 +380,110 @@ def wipe_db(conn: sqlite3.Connection) -> int:
 
 
 def reauth_ok(request: Request, password: str, code: str) -> bool:
-    """The owner's password, or a current TOTP code. Wrong tries count toward the login lock."""
+    """The owner's password, and a current code when 2-step login is on. Wrong tries count
+    toward the login lock."""
     s = request.app.state
     admin = auth.get_admin(s.db)
     if admin is None or auth.lock_seconds_remaining(s.db):
         return False
     ok = bool(password) and auth.verify_password(admin["password_hash"], password)
-    if not ok and code.strip():
-        try:
-            ok = auth.verify_totp(
-                crypto.decrypt(s.config.secret_key, admin["totp_secret_enc"]), code
-            )
-        except Exception:
-            log.error("could not read the stored TOTP secret (SECRET_KEY changed?)")
+    if ok and admin["totp_secret_enc"]:
+        ok = auth.check_totp(s.db, s.config.secret_key, code)
     if ok:
         auth.record_success(s.db)
     else:
         auth.record_failure(s.db, s.settings)
     return ok
+
+
+# ---------------------------------------------------------------- 2-step login (optional)
+
+
+def _two_step(request: Request) -> dict[str, Any]:
+    """State for the "Two-step login" card: on/off, and the QR while a turn-on is pending."""
+    s = request.app.state
+    info: dict[str, Any] = {"enabled": auth.totp_enabled(s.db), "pending": False}
+    pending = auth.load_session(request).data.get("totp_pending")
+    if pending and not info["enabled"]:
+        try:
+            secret = crypto.decrypt(s.config.secret_key, pending["s"])
+        except Exception:
+            return info
+        url = auth.provisioning_uri(secret, pending["u"])
+        info.update(pending=True, secret=secret, url=url, qr_svg=auth.qr_svg(url))
+    return info
+
+
+@router.post("/settings/claude")
+def settings_claude(
+    request: Request,
+    oauth_token: str = Form(""),
+    api_key: str = Form(""),
+    remove: str = Form(""),
+) -> Response:
+    """Replace or remove the saved Claude token / API key. Nothing is shown back."""
+    s = request.app.state
+    if remove in ("token", "key"):
+        key = claude_auth.TOKEN_KEY if remove == "token" else claude_auth.API_KEY
+        claude_auth.save(s.settings, s.config, key, "")
+        return _page(request, notice="Removed.")
+    for key, plain in ((claude_auth.TOKEN_KEY, oauth_token), (claude_auth.API_KEY, api_key)):
+        if plain.strip():
+            claude_auth.save(s.settings, s.config, key, plain.strip()[: claude_auth.VALUE_MAX])
+    return _page(request, notice="Saved.")
+
+
+@router.post("/settings/two-step/start")
+def two_step_start(request: Request) -> Response:
+    s = request.app.state
+    admin = auth.get_admin(s.db)
+    if admin is None or admin["totp_secret_enc"]:
+        return _page(request, 400, error="Two-step login is already on.")
+    pending = {
+        "u": admin["username"],
+        "s": crypto.encrypt(s.config.secret_key, auth.new_totp_secret()),
+    }
+    auth.load_session(request).set("totp_pending", pending)
+    return _page(request)
+
+
+@router.post("/settings/two-step/enable")
+def two_step_enable(request: Request, code: str = Form("")) -> Response:
+    s = request.app.state
+    session = auth.load_session(request)
+    pending = session.data.get("totp_pending")
+    if not pending or auth.totp_enabled(s.db):
+        return _page(request, 400, error="Press Turn on first.")
+    secret = crypto.decrypt(s.config.secret_key, pending["s"])
+    if not auth.verify_totp(secret, code):
+        return _page(request, 400, error="That code is wrong. Try the next one.")
+    auth.set_totp(s.db, pending["s"])
+    session.pop("totp_pending")
+    log.info("Two-step login was turned on")
+    return _page(request, notice="Two-step login is on. You need a code to log in.")
+
+
+@router.post("/settings/two-step/disable")
+def two_step_disable(request: Request, password: str = Form(""), code: str = Form("")) -> Response:
+    s = request.app.state
+    if not auth.totp_enabled(s.db):
+        return _page(request, 400, error="Two-step login is already off.")
+    if auth.lock_seconds_remaining(s.db):
+        return _page(request, 429, error="Too many wrong tries. Try again later.")
+    if not reauth_ok(request, password, code):
+        return _page(request, 403, error="Wrong password or code. Nothing changed.")
+    auth.set_totp(s.db, None)
+    log.info("Two-step login was turned off")
+    return _page(request, notice="Two-step login is off.")
+
+
+@router.post("/settings/two-step/skip")
+def two_step_skip(request: Request, back: str = Form("/")) -> Response:
+    """Skip the reminder banner. It comes back after security.totp_reminder_again_days."""
+    request.app.state.settings.set("security.totp_reminder_skipped_at", auth.utcnow().isoformat())
+    safe = back.startswith("/") and not back.startswith("//") and "\\" not in back
+    target = back if safe else "/"
+    return RedirectResponse(target, status_code=303)
 
 
 @router.post("/settings/delete-all")
@@ -416,7 +512,6 @@ def settings_delete_all(
         log.exception("Delete all data failed")
         return _page(request, 500, error="Deleting failed part way. See the log.")
     log.warning("All data was deleted by the owner")
-    # Back to a fresh install: a new one-time setup code, then log out.
-    print(f"SETUP CODE: {auth.issue_setup_code(s.db, s.config.secret_key)}", flush=True)
+    # Back to a fresh install: log out; the next visitor sees "Create your account".
     auth.load_session(request).logout()
     return RedirectResponse("/setup", status_code=303)

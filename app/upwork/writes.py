@@ -224,6 +224,47 @@ def issue_click(request: Any, action: str) -> UserClick:
     return UserClick._issue(user, action)
 
 
+SYSTEM_USER = "system"
+
+
+def issue_system_click(
+    conn: sqlite3.Connection,
+    settings: Settings,
+    action: str,
+    *,
+    auto_send_id: int | None = None,
+    job_id: str | None = None,
+) -> UserClick:
+    """The owner-approved consent of the auto-send path (round 3), instead of a user click.
+
+    The owner asked for a proposal to go out by itself when a countdown ends with no Stop. This
+    is the ONLY way to get a click without a request. It checks the facts in the database, so a
+    caller cannot make one by saying so:
+    - the kill switch is off, dry-run is off, `auto_send.enabled` is on;
+    - `confirm`: an `auto_sends` row `auto_send_id` is `sending`, claimed by the system, and its
+      deadline has passed (the countdown really ended with no Stop);
+    - `preview`: the same row, or (to start a countdown) a numeric `job_id` with no row yet.
+    """
+    if action not in CLICK_ACTIONS:
+        raise ClickRequired("Unknown click action.")
+    if settings.get("general.kill_switch"):
+        raise ClickRequired("The kill switch is on. No system consent.")
+    if settings.get("general.dry_run"):
+        raise ClickRequired("Dry-run is on. No system consent.")
+    if not settings.get("auto_send.enabled"):
+        raise ClickRequired("Auto-send is off. No system consent.")
+    if auto_send_id is not None:
+        row = conn.execute("SELECT * FROM auto_sends WHERE id = ?", (auto_send_id,)).fetchone()
+        if row is None or row["status"] != "sending" or row["decided_by"] != SYSTEM_USER:
+            raise ClickRequired("No ended countdown claimed by the system for this send.")
+        ended = _parse_iso(row["deadline"])
+        if ended is None or ended > datetime.now(UTC):
+            raise ClickRequired("The countdown has not ended yet.")
+    elif action == "confirm" or not (job_id and _JOB_ID_RE.match(str(job_id))):
+        raise ClickRequired("A system confirm needs an ended countdown.")
+    return UserClick._issue(SYSTEM_USER, action)
+
+
 # ---------------------------------------------------------------- argument checks
 
 
@@ -337,7 +378,7 @@ class ClaudeUpworkWriter:
             int(self.settings.get("writes.max_turns")),
             float(self.settings.get("writes.max_budget_usd")),
         )
-        env = claude_env(self.config)
+        env = claude_env(self.config, self.settings)
         env["CLAUDE_CONFIG_DIR"] = str(cfg_dir)
         timeout = int(self.settings.get("writes.timeout_seconds"))
         log.warning(

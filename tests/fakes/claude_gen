@@ -14,6 +14,12 @@ Knobs (env):
   FAKE_GEN_LIMIT_AFTER=N  answer calls after the Nth with a 429 usage limit
   FAKE_GEN_FAIL=1     return text that is not JSON
   FAKE_GEN_OMIT=ID    leave this job id out of the answer
+  FAKE_GEN_NOELIG=1   the judge leaves out skills_match_all, win_chance and client_quality
+  FAKE_GEN_WIN / FAKE_GEN_CLIENT / FAKE_GEN_SKILLS   judge answers (default high / good / true)
+  FAKE_GEN_BADRULES=1 the writer breaks the proposal rules (bold, link, emoji, bullets)
+
+Fix task ("# Task: fix proposal rules", round 3 A1): removes rule-breaking marks from the draft.
+FAKE_FIX_STILL=1 returns the draft unchanged, FAKE_FIX_BAD=1 answers without a letter.
 
 Reply task ("# Task: draft reply", plan H3): answers {"reply": ...}. FAKE_REPLY_EM=1 puts em and
 en dashes in it, FAKE_REPLY_EMPTY=1 answers without text.
@@ -61,7 +67,9 @@ prompt = argv[argv.index("-p") + 1] if "-p" in argv else ""
 model = argv[argv.index("--model") + 1] if "--model" in argv else ""
 effort = argv[argv.index("--effort") + 1] if "--effort" in argv else None
 task = (
-    "judge"
+    "fixrules"
+    if "# Task: fix proposal rules" in prompt
+    else "judge"
     if "# Task: judge jobs" in prompt
     else "build"
     if "# Task: build USER.md" in prompt
@@ -270,6 +278,28 @@ elif task == "reply":
     if os.environ.get("FAKE_REPLY_EM"):
         text = f"Thanks {EM} I will look at it today{EM}fast. Range 5{EN}10."
     out = {} if os.environ.get("FAKE_REPLY_EMPTY") else {"reply": text}
+elif task == "fixrules":
+    draft = data["draft"]
+
+    def clean(text):
+        text = re.sub(r"https?://\S+|www\.\S+", "", text)
+        text = re.sub(r"\b[A-Za-z0-9][A-Za-z0-9-]*\.(?:com|io|net|org)\b", "", text)
+        text = re.sub(r"(?m)^\s*[-*\d.)]+\s+", "", text)
+        text = re.sub(r"[*_#`\[\]<>]|[\U0001F000-\U0001FAFF\u2600-\u27BF]", "", text)
+        return re.sub(r" {2,}", " ", text).strip()
+
+    if os.environ.get("FAKE_FIX_STILL"):
+        out = {"cover_letter": draft["cover_letter"], "screening_answers": draft["screening_answers"]}
+    else:
+        out = {
+            "cover_letter": clean(draft["cover_letter"]),
+            "screening_answers": [
+                {"question": a["question"], "answer": clean(a["answer"])}
+                for a in draft["screening_answers"]
+            ],
+        }
+    if os.environ.get("FAKE_FIX_BAD"):
+        out = {"nope": 1}
 elif task == "review":
     m = re.search(r"<draft>\n(.*)\n</draft>", data["draft"], re.S)
     draft = json.loads(m.group(1))
@@ -333,6 +363,15 @@ elif task == "judge":
                 "instructions_in_post": ["Start the proposal with the word Bots"],
             }
         )
+        if not os.environ.get("FAKE_GEN_NOELIG"):
+            items[-1].update(
+                skills_match_all=os.environ.get("FAKE_GEN_SKILLS", "true") == "true",
+                skills_match_reason=f"covers n8n{EM if dash else ','} CRM",
+                win_chance=os.environ.get("FAKE_GEN_WIN", "high"),
+                win_chance_reason="few proposals",
+                client_quality=os.environ.get("FAKE_GEN_CLIENT", "good"),
+                client_quality_reason="paid well before",
+            )
     out = {"judgements": items}
 else:
     plans = {p["job_id"]: p for p in data["plans"]}
@@ -354,6 +393,14 @@ else:
             "instructions_handled": [{"instruction": i, "how": "done"} for i in ins],
             "skipped_instructions": [],
         }
+        if os.environ.get("FAKE_GEN_BADRULES"):
+            item["cover_letter"] = (
+                "Bots. **Your CRM leaks leads.** I fix that, see https://example.com/work\n"
+                "- fast\n- cheap \U0001F600"
+            )
+            item["screening_answers"] = [
+                {"question": q, "answer": "Check mysite.com for _proof_."} for q in qs
+            ]
         if os.environ.get("FAKE_GEN_SKIP"):
             item["instructions_handled"] = []
             item["skipped_instructions"] = [{"instruction": i, "reason": "no facts"} for i in ins]

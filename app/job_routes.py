@@ -20,6 +20,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
+from app import auto_send, auto_send_flow, proposal_rules
 from app import job_actions as ja
 from app.llm import prompting
 from app.llm.runner import ClaudeError
@@ -140,11 +141,20 @@ def save_draft(
         code = "saved_clean"
     old = ja.draft_answers(draft)
     merged = [{"question": o["question"], "answer": a} for o, a in zip(old, answers, strict=True)]
+    left = proposal_rules.check_draft(cover_letter, merged)  # Python only, no Claude call
     s.db.execute(
-        "UPDATE drafts SET cover_letter = ?, answers = ?, suggested_rate = ?, edited_by_user = 1 "
-        "WHERE id = ?",
-        (cover_letter, json.dumps(merged, ensure_ascii=False), value, draft["id"]),
+        "UPDATE drafts SET cover_letter = ?, answers = ?, suggested_rate = ?, edited_by_user = 1, "
+        "rules_ok = ?, rules_problems = ? WHERE id = ?",
+        (
+            cover_letter,
+            json.dumps(merged, ensure_ascii=False),
+            value,
+            0 if left else 1,
+            json.dumps(left, ensure_ascii=False),
+            draft["id"],
+        ),
     )
+    auto_send.cancel_waiting_for_job(s.db, job_id, "You edited the draft")
     return _done(job_id, code)
 
 
@@ -185,18 +195,7 @@ def _set_status_conn(conn: Any, job_id: str, status: str, only_from: tuple[str, 
 # ---------------------------------------------------------------- prepare
 
 
-def _fetch_highlights(reader: Any, org: str, limit: int) -> list[dict[str, Any]] | None:
-    """`get_profile list_highlights` through the READ bridge. None when it cannot be read."""
-    try:
-        res = reader.call_many(
-            [("get_profile", {"action": "list_highlights", "org_uid": org, "params": {}})]
-        )[0]
-        if res.is_error:
-            return None
-        return ja.parse_highlights(res.data(), limit)
-    except (UpworkMCPError, ClaudeError):
-        log.info("Highlights could not be read", exc_info=True)
-        return None
+_fetch_highlights = ja.fetch_highlights
 
 
 def _boost(value: str) -> int | None:
@@ -220,6 +219,7 @@ def prepare(request: Request, job_id: str, boost_connects: str = Form("")) -> Re
     except writes.WriteError as exc:
         return _fail(request, job_id, _error_text(exc))
     click = writes.issue_click(request, "preview")
+    auto_send.cancel_waiting_for_job(s.db, job_id, "You prepared this proposal by hand")
     config = s.config
     factory = getattr(s, "mcp_factory", None)
     cover_letter = draft["cover_letter"]
@@ -376,6 +376,8 @@ def _repreview_with_highlights(
 @router.post("/jobs/{job_id}/approve")
 def approve(request: Request, job_id: str, preview: int = Form(0)) -> Response:
     """Confirm the previewed proposal. With dry-run on (the default) nothing is sent."""
+    if auto_send.waiting_for_job(request.app.state.db, job_id) is not None:
+        return _auto_approve(request, job_id)  # the countdown card's Approve, same clicks
     if (blocked := _guard(request, job_id, "approve")) is not None:
         return blocked
     s = request.app.state
@@ -414,6 +416,71 @@ def approve(request: Request, job_id: str, preview: int = Form(0)) -> Response:
         raise WorkerError(result.message or "Upwork did not accept it. Nothing was sent.")
 
     return _queue(request, "job_approve", job_id, "Approving the proposal", work)
+
+
+# ---------------------------------------------------------------- auto-send countdown (round 3)
+
+
+@router.post("/jobs/{job_id}/auto/stop")
+def auto_stop(request: Request, job_id: str) -> Response:
+    """Stop the countdown. One atomic UPDATE: if the app already took it, this says too late."""
+    _job(request, job_id)
+    db = request.app.state.db
+    row = auto_send.waiting_for_job(db, job_id)
+    if row is None or not auto_send.stop(db, row["id"]):
+        return _done(job_id, "auto_late")
+    return _done(job_id, "auto_stopped")
+
+
+@router.post("/jobs/{job_id}/auto/approve")
+def auto_approve(request: Request, job_id: str) -> Response:
+    _job(request, job_id)
+    return _auto_approve(request, job_id)
+
+
+def _auto_approve(request: Request, job_id: str) -> Response:
+    """Send the countdown's proposal now. The user's own clicks (preview and confirm) are made
+    here; nothing is claimed unless the settings allow a send."""
+    s = request.app.state
+    if s.settings.get("general.kill_switch"):
+        return _fail(
+            request, job_id, "The kill switch is on, so nothing is sent.", "warn", status=409
+        )
+    if s.settings.get("general.dry_run"):
+        return _fail(request, job_id, ja.JOB_MESSAGES["dry_run"][1], "info", status=409)
+    row = auto_send.waiting_for_job(s.db, job_id)
+    if row is None:
+        return _done(job_id, "auto_late")
+    preview_click = writes.issue_click(request, "preview")
+    confirm_click = writes.issue_click(request, "confirm")
+    if not auto_send.approve(s.db, row["id"]):  # a Stop or the deadline got there first
+        return _done(job_id, "auto_late")
+    config = s.config
+    factory = getattr(s, "mcp_factory", None)
+    row_id = row["id"]
+
+    def work(ctx: Any) -> tuple[str, str]:
+        if not auto_send.begin_user_send(ctx.conn, row_id):
+            raise WorkerError("This countdown was already handled.")
+        reader = _make_bridge(factory, config, ctx)
+        try:
+            outcome = auto_send_flow.deliver(
+                ctx.conn,
+                config,
+                ctx.settings,
+                row_id,
+                by="user",
+                make_click=lambda action: preview_click if action == "preview" else confirm_click,
+                reader=reader,
+                writer=_make_writer(config, ctx),
+            )
+        finally:
+            _close(reader)
+        if outcome.status == "sent":
+            return _outcome(job_id, "sent")
+        raise WorkerError(f"Not sent: {outcome.message}")
+
+    return _queue(request, "job_approve", job_id, "Sending the proposal now", work)
 
 
 @router.post("/jobs/{job_id}/remake")
@@ -473,6 +540,7 @@ def skip(request: Request, job_id: str) -> Response:
     if job["status"] == "sent":
         return _fail(request, job_id, "This job was already sent.", "warn", status=409)
     request.app.state.db.execute("UPDATE jobs SET status = 'skipped' WHERE job_id = ?", (job_id,))
+    auto_send.cancel_waiting_for_job(request.app.state.db, job_id, "You skipped this job")
     return _done(job_id, "skipped")
 
 

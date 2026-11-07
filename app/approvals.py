@@ -20,6 +20,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app import auto_send
 from app.settings import Settings
 from app.upwork import writes
 
@@ -178,7 +179,10 @@ def open_previews(
     ).fetchall()
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
+    countdown = auto_send.active_preview_ids(conn)  # shown as a countdown card, not here
     for r in rows:
+        if r["id"] in countdown:
+            continue
         key = r["job_id"] or r["invitation_uid"] or f"id{r['id']}"
         if key in seen:
             continue
@@ -205,7 +209,11 @@ def open_previews(
 
 def pending_count(conn: sqlite3.Connection, settings: Settings, now: datetime | None = None) -> int:
     """Generic pending items plus open proposal previews (the number in the nav)."""
-    return len(pending_items(conn, settings, now)) + len(open_previews(conn, settings, now))
+    return (
+        len(pending_items(conn, settings, now))
+        + len(open_previews(conn, settings, now))
+        + len(auto_send.waiting_cards(conn, now))
+    )
 
 
 # ---------------------------------------------------------------- decide

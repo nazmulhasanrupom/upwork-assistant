@@ -38,7 +38,6 @@ PUBLIC_PATHS = {
     "/setup",
     "/setup/account",
     "/setup/totp",
-    "/setup/confirm",
     "/setup/admin",
     "/setup/admin/totp",
     "/gmail/callback",
@@ -115,9 +114,13 @@ def get_admin(conn: sqlite3.Connection) -> sqlite3.Row | None:
 
 
 def create_admin(
-    conn: sqlite3.Connection, username: str, password_hash: str, totp_secret_enc: str
+    conn: sqlite3.Connection,
+    username: str,
+    password_hash: str,
+    totp_secret_enc: str | None = None,
 ) -> None:
-    """Raises sqlite3.IntegrityError if an admin already exists. The secret is pre-encrypted."""
+    """Raises sqlite3.IntegrityError if an admin already exists. 2-step login starts OFF
+    (no secret); a given secret is pre-encrypted."""
     conn.execute(
         "INSERT INTO admin(id, username, password_hash, totp_secret_enc, created_at) "
         "VALUES (1, ?, ?, ?, ?)",
@@ -125,38 +128,51 @@ def create_admin(
     )
 
 
-# ---------- one-time setup code (plan D0) ----------
+def totp_enabled(conn: sqlite3.Connection) -> bool:
+    admin = get_admin(conn)
+    return admin is not None and bool(admin["totp_secret_enc"])
 
 
-def _setup_code_hash(secret_key: str, code: str) -> str:
-    return hmac.new(
-        crypto.derive_key(secret_key, "setup-code"), code.strip().encode(), "sha256"
-    ).hexdigest()
+def set_totp(conn: sqlite3.Connection, totp_secret_enc: str | None) -> None:
+    """Turn 2-step login on (pre-encrypted secret) or off (None)."""
+    conn.execute("UPDATE admin SET totp_secret_enc = ? WHERE id = 1", (totp_secret_enc,))
 
 
-def issue_setup_code(conn: sqlite3.Connection, secret_key: str) -> str:
-    """Make a new random code, store only its hash, return the plain code (to print once)."""
-    code = secrets.token_urlsafe(12)
-    conn.execute(
-        "INSERT INTO setup_code(id, code_hash, created_at) VALUES (1, ?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET code_hash = excluded.code_hash, "
-        "created_at = excluded.created_at",
-        (_setup_code_hash(secret_key, code), utcnow().isoformat(timespec="seconds")),
-    )
-    return code
-
-
-def check_setup_code(conn: sqlite3.Connection, secret_key: str, code: str) -> bool:
-    row = conn.execute("SELECT code_hash FROM setup_code WHERE id = 1").fetchone()
-    if row is None or not code.strip():
+def check_totp(conn: sqlite3.Connection, secret_key: str, code: str) -> bool:
+    """True if 2-step login is on and the code is right."""
+    admin = get_admin(conn)
+    if admin is None or not admin["totp_secret_enc"]:
         return False
-    return hmac.compare_digest(row["code_hash"], _setup_code_hash(secret_key, code))
+    try:
+        return verify_totp(crypto.decrypt(secret_key, admin["totp_secret_enc"]), code)
+    except Exception:  # bad key or damaged row; never log the value
+        log.error("could not read the stored TOTP secret (SECRET_KEY changed?)")
+        return False
 
 
-def finish_setup(conn: sqlite3.Connection) -> None:
-    """The admin exists: drop the code and clear any lock caused by wrong setup codes."""
-    conn.execute("DELETE FROM setup_code WHERE id = 1")
-    record_success(conn)
+def totp_reminder_due(conn: sqlite3.Connection, settings: Settings) -> bool:
+    """Calm banner: 2-step login is off and the account is old enough. After a Skip it comes
+    back only after security.totp_reminder_again_days (0 = never again)."""
+    admin = get_admin(conn)
+    if admin is None or admin["totp_secret_enc"]:
+        return False
+    now = utcnow()
+    start = _parse_time(admin["created_at"])
+    if start is None or now < start + timedelta(days=settings.get("security.totp_reminder_days")):
+        return False
+    skipped = _parse_time(str(settings.get("security.totp_reminder_skipped_at") or ""))
+    if skipped is None:
+        return True
+    again = settings.get("security.totp_reminder_again_days")
+    return again > 0 and now >= skipped + timedelta(days=again)
+
+
+def _parse_time(text: str) -> datetime | None:
+    try:
+        value = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 # ---------- lockout (stored in the DB) ----------
@@ -216,14 +232,10 @@ def attempt_login(
     stored_hash = admin["password_hash"] if admin else _dummy_hash()
     pw_ok = verify_password(stored_hash, password)
     user_ok = admin is not None and hmac.compare_digest(
-        username.strip().encode(), admin["username"].encode()
+        username.strip().lower().encode(), admin["username"].lower().encode()
     )
-    totp_ok = False
-    if admin is not None:
-        try:
-            totp_ok = verify_totp(crypto.decrypt(secret_key, admin["totp_secret_enc"]), code)
-        except Exception:  # bad key or damaged row; never log the value
-            log.error("could not read the stored TOTP secret (SECRET_KEY changed?)")
+    # The code counts only when 2-step login is on.
+    totp_ok = not (admin and admin["totp_secret_enc"]) or check_totp(conn, secret_key, code)
     if pw_ok and user_ok and totp_ok:
         record_success(conn)
         return LoginResult("ok")

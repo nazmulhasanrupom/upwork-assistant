@@ -182,7 +182,7 @@ def _login_env(request: Request) -> tuple[dict[str, str], str]:
     s = request.app.state
     config_dir = claude_config_dir(s.config, s.settings)
     config_dir.mkdir(parents=True, exist_ok=True)
-    env = claude_env(s.config)
+    env = claude_env(s.config, s.settings)
     env["CLAUDE_CONFIG_DIR"] = str(config_dir)
     return env, str(config_dir)
 

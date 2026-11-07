@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import action_status, badge, pill, chips, button, card, flash, copy_button, info, icon %}
+{% from "_auto_send.html" import auto_card %}
 {% block title %}{{ job.title or job.job_id }}{% endblock %}
 {# A write button in its own form. Why it is off goes in the "i" next to it (not a tooltip on a disabled button, which never gets hover). #}
 {% macro act_form(path, label, kind="primary", reason="", fid="") %}
@@ -101,7 +102,9 @@
 
   <aside class="detail-side apply-side" aria-label="Apply">
     {% set p = act.preview %}
+    {% for a in auto_cards %}{{ auto_card(a, csrf_token, act.dry_run, false) }}{% endfor %}
     {% call card("Apply", help_key="job.apply") %}
+    {% if auto_last %}{{ flash("info", "Auto-send for this job: " ~ auto_last.status ~ ((" - " ~ (auto_last.error or auto_last.reason)) if (auto_last.error or auto_last.reason) else "") ~ ".") }}{% endif %}
     {% if act.dry_run %}{{ flash("info", "Dry-run is ON: Approve is logged and nothing is sent to Upwork.") }}{% endif %}
     {% if act.kill_switch %}{{ flash("error", "The kill switch is on. Prepare, answer, re-make and Approve are off. Editing and skipping still work.") }}{% elif act.blocked %}{{ flash("info", act.blocked) }}{% endif %}
 
@@ -111,6 +114,8 @@
     {% if not draft %}
     <div class="placeholder">{{ draft_note or "No draft yet." }}</div>
     {% else %}
+    {% if draft.rules_broken %}{{ flash("error", "This draft breaks the proposal rules (plain text only: no bold, markdown, emoji, links, web-address words or dashes). It will not be auto-sent. Fix it before you prepare it.") }}{{ info("job.rules") }}
+    <ul class="plain-list">{% for f in draft.rules_list %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
     {% for f in draft.flag_list %}{{ flash("warn", f) }}{% endfor %}
 
     <div class="apply-scroll">

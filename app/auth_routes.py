@@ -13,6 +13,8 @@ router = APIRouter()
 def render(request: Request, name: str, status: int = 200, **ctx) -> Response:
     session = auth.load_session(request)
     ctx.update(csrf_token=session.csrf, user=auth.current_user(request))
+    if name == "login.html":  # the code field shows only when 2-step login is on
+        ctx["totp"] = auth.totp_enabled(request.app.state.db)
     return request.app.state.templates.TemplateResponse(request, name, ctx, status_code=status)
 
 
@@ -44,13 +46,14 @@ def login_submit(
         app.state.db, app.state.settings, app.state.config.secret_key, username, password, code
     )
     if result.status == "ok":
-        auth.load_session(request).login(username.strip())
+        auth.load_session(request).login(auth.get_admin(app.state.db)["username"])
         return _redirect("/")
     if result.status == "locked":
         minutes = max(1, -(-result.locked_seconds // 60))
         msg = f"Too many wrong tries. Try again in about {minutes} minute(s)."
         return render(request, "login.html", 429, error=msg)
-    return render(request, "login.html", 401, error="Wrong user name, password or code.")
+    what = "email, password or code" if auth.totp_enabled(app.state.db) else "email or password"
+    return render(request, "login.html", 401, error=f"Wrong {what}.")
 
 
 @router.post("/logout")

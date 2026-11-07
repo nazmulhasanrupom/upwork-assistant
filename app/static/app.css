@@ -222,6 +222,12 @@ input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); ou
   background: var(--info-bg); color: var(--info-fg);
 }
 .alerts .flash { margin: 0; }
+.reminder {
+  display: flex; flex-wrap: wrap; gap: var(--s1); align-items: center; justify-content: center;
+  padding: 8px var(--s2); border-bottom: 1px solid var(--info-line);
+  background: var(--info-bg); color: var(--info-fg);
+}
+.reminder form { margin: 0; }
 .flash-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; flex: none; }
 .flash-text { overflow-wrap: anywhere; }
 .flash a { color: inherit; font-weight: 600; }
@@ -913,3 +919,16 @@ body:has(.chat-view) footer, body:has(.chat-view) .claude-dock { display: none; 
   .chat-dock { background: linear-gradient(to top, var(--bg) 78%, transparent); }
   .chat-log { padding-bottom: var(--s3); }
 }
+
+/* Auto-send countdown card and top bar pill (round 3) */
+.auto-card { border-left: 4px solid var(--warn-line); }
+.auto-clock { margin-left: auto; font-variant-numeric: tabular-nums; }
+.auto-timer { font-variant-numeric: tabular-nums; }
+.auto-actions { margin-top: var(--s1); }
+.auto-letter pre.text { max-height: 18rem; overflow: auto; white-space: pre-wrap; }
+.auto-list { display: grid; gap: var(--s2); margin-bottom: var(--s3); }
+
+.setup-bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.35rem 1rem; font-size: 0.85rem; text-decoration: none; color: inherit; border-bottom: 1px solid var(--border, #ddd); }
+.setup-bar-track { flex: 1; height: 4px; border-radius: 2px; background: var(--border, #ddd); overflow: hidden; }
+.setup-bar-fill { display: block; height: 100%; background: var(--accent, #2563eb); }
+.claude-steps { padding-left: 1.25rem; display: grid; gap: 0.5rem; }

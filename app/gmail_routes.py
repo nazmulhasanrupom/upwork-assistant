@@ -20,6 +20,7 @@ from fastapi.responses import RedirectResponse, Response
 
 from app import mail
 from app.auth_routes import render
+from app.base_url import get_base_url
 from app.gmail import Gmail, GmailError
 from app.worker import WorkerError, known_action
 
@@ -52,7 +53,7 @@ def gmail_for(request: Request) -> Gmail:
 def _page(request: Request, status_code: int = 200, **ctx) -> Response:
     g = gmail_for(request)
     s = request.app.state
-    base = s.config.public_base_url
+    base = get_base_url(s.settings, s.config)
     return render(
         request,
         "email_settings.html",
@@ -162,7 +163,7 @@ def send_test(request: Request):
     text, html = mail.build_email(
         "Test email",
         ["This is a test from Upwork Assistant.", "If you can read this, email works."],
-        base_url=s.config.public_base_url,
+        base_url=get_base_url(s.settings, s.config),
     )
     config = s.config
 

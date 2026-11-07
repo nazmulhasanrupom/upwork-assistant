@@ -78,7 +78,7 @@ def test_start_needs_public_base_url(config, conn):
     from dataclasses import replace
 
     c = UpworkOAuth(replace(config, public_base_url=""), Settings(conn), conn)
-    with pytest.raises(OAuthError, match="PUBLIC_BASE_URL"):
+    with pytest.raises(OAuthError, match="panel address"):
         c.start()
 
 

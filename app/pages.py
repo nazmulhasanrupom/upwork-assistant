@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import approvals, charts, job_actions, markdown_lite
+from app import approvals, auto_send, charts, job_actions, markdown_lite
 from app import costs as cost_totals
 from app import metrics as metrics_data
 from app import rank as rank_data
@@ -581,7 +581,17 @@ def job_page(
         max_letter=int(settings.get("writes.cover_letter_max_chars")),
         max_answer=int(settings.get("writes.answer_max_chars")),
         connects_balance=latest["balance"] if latest else None,
+        auto_cards=[c for c in auto_send.waiting_cards(conn) if c["job_id"] == job_id],
+        auto_last=_auto_last(conn, job_id),
     )
+
+
+def _auto_last(conn: sqlite3.Connection, job_id: str) -> dict[str, Any] | None:
+    """The last finished auto-send countdown of the job, for a one-line note on the job page."""
+    row = auto_send.for_job(conn, job_id)
+    if row is None or row["status"] in ("waiting", "approved", "sending"):
+        return None
+    return {"status": row["status"], "reason": row["reason"], "error": row["error"]}
 
 
 def _lines(value: str | None) -> list[str]:
@@ -611,6 +621,8 @@ def draft_view(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "answer_list": _json(row["answers"], []),
         "material_list": _json(row["materials"], []),
         "flag_list": _json(row["flags"], []),
+        "rules_broken": row["rules_ok"] == 0,
+        "rules_list": _json(row["rules_problems"], []),
         "length": len(row["cover_letter"] or ""),
     }
 

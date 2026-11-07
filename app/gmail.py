@@ -34,6 +34,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app import crypto
+from app.base_url import get_base_url
 from app.config import Config
 from app.settings import Settings
 from app.upwork.oauth import challenge_for, new_verifier
@@ -217,9 +218,13 @@ class Gmail:
         return f"{self.require_base_url()}/gmail/callback"
 
     def require_base_url(self) -> str:
-        if not self.config.public_base_url:
-            raise GmailError("PUBLIC_BASE_URL is not set. Google needs your public HTTPS address.")
-        return self.config.public_base_url
+        base = get_base_url(self.settings, self.config)
+        if not base:
+            raise GmailError(
+                "The panel address is not known yet. Open the panel on its real address "
+                "or set it in Settings."
+            )
+        return base
 
     # -- status --
 

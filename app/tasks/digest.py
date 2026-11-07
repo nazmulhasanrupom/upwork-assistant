@@ -22,6 +22,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app import costs, mail
+from app.base_url import get_base_url
 from app.config import Config, load_config
 from app.db import init_db
 from app.llm.live import ClaudeCancelled
@@ -157,9 +158,11 @@ def _rate(v: Any) -> str:
     return f"${v:,.2f}/hr paid" if isinstance(v, (int, float)) else ""
 
 
-def build(data: dict[str, Any], config: Config, max_jobs: int) -> tuple[str, str, str]:
-    """(subject, plain text, HTML)."""
-    base = config.public_base_url.rstrip("/")
+def build(
+    data: dict[str, Any], config: Config, max_jobs: int, base_url: str | None = None
+) -> tuple[str, str, str]:
+    """(subject, plain text, HTML). `base_url` is the panel address (default: the env value)."""
+    base = (config.public_base_url if base_url is None else base_url).rstrip("/")
     jobs = data["jobs"]
     shown = jobs[: max(0, max_jobs)]
     tiers = data["tiers"]
@@ -207,7 +210,7 @@ def build(data: dict[str, Any], config: Config, max_jobs: int) -> tuple[str, str
         facts=facts,
         items=items,
         link_path="/jobs",
-        base_url=config.public_base_url,
+        base_url=base,
         button_label="Open jobs in the panel",
     )
     subject = f"Daily digest {data['day']}: {data['kept']} new job(s), {data['drafted']} draft(s)"
@@ -247,7 +250,12 @@ def run_digest(
         if not data["kept"] and settings.get("email.digest_skip_empty"):
             result.status, result.error = "skipped", "Nothing new today, so no digest was sent."
         else:
-            subject, text, html = build(data, config, int(settings.get("email.digest_max_jobs")))
+            subject, text, html = build(
+                data,
+                config,
+                int(settings.get("email.digest_max_jobs")),
+                get_base_url(settings, config),
+            )
             result.sent = mail.send_event(
                 conn,
                 EVENT,

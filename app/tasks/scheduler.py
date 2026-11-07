@@ -95,6 +95,14 @@ def _interval_passed(settings: Settings, name: str, now: datetime) -> bool:
     return now - last >= timedelta(days=days)
 
 
+def _cron(settings: Settings, name: str) -> str:
+    """The cron string of a task. The auto-send check has no schedule setting: it runs every
+    `auto_send.check_minutes` (the tick itself only happens every 5 minutes)."""
+    if name == "auto_send":
+        return f"*/{max(1, int(settings.get('auto_send.check_minutes')))} * * * *"
+    return settings.get(f"schedules.{name}")
+
+
 def tick(
     settings: Settings,
     config: Config,
@@ -109,10 +117,10 @@ def tick(
 
     zone = _zone(config, settings)
     grace = timedelta(minutes=float(settings.get("schedules.grace_minutes")))
-    for name in trigger.TASKS + trigger.SCHEDULED_MANUAL:
+    for name in trigger.TASKS + trigger.SCHEDULED_MANUAL + trigger.SCHEDULED_ONLY:
         if not trigger.is_built(name):
             continue
-        expr = settings.get(f"schedules.{name}")
+        expr = _cron(settings, name)
         slot = latest_slot(expr, now, zone)
         if slot is None:
             log.warning("Schedule for %s is not a valid cron string: %r", name, expr)

@@ -3,7 +3,7 @@ The app talks to Upwork through `app/upwork/bridge.py` instead.
 
 Upwork OAuth 2 + PKCE for a public client (SPEC 3.6, 13.1). No client secret.
 
-- `client_id` is the URL of our own metadata document: ${PUBLIC_BASE_URL}/oauth/client-metadata.json
+- `client_id` is the URL of our own metadata document: ${panel address}/oauth/client-metadata.json
 - `state` and the PKCE verifier live in the DB table `oauth_state`, not in the session cookie.
 - Tokens live in `${DATA_DIR}/tokens.enc`: one Fernet-encrypted JSON blob, written atomically
   (temp file + rename) with mode 0600. A lock file keeps the panel and the scheduler from
@@ -32,6 +32,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app import crypto
+from app.base_url import get_base_url
 from app.config import Config
 from app.settings import Settings
 
@@ -172,9 +173,13 @@ class UpworkOAuth:
         return f"{self.require_base_url()}/oauth/callback"
 
     def require_base_url(self) -> str:
-        if not self.config.public_base_url:
-            raise OAuthError("PUBLIC_BASE_URL is not set. Upwork needs your public HTTPS address.")
-        return self.config.public_base_url
+        base = get_base_url(self.settings, self.config)
+        if not base:
+            raise OAuthError(
+                "The panel address is not known yet. Open the panel on its real address "
+                "or set it in Settings."
+            )
+        return base
 
     def _s(self, name: str):
         return self.settings.get(f"upwork.{name}")

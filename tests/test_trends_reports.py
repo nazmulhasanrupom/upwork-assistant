@@ -48,8 +48,9 @@ def test_trends_shows_skill_chart_and_median_lines(web):
     assert 'id="trends-fixed"' in html and 'class="line"' in html
     assert "<b>Evil</b>" not in html and "&lt;b&gt;Evil" in html
     assert 'id="trends-table"' in html and "$250" in html
-    head = re.sub(r"\?v=[0-9a-f]+", "", html.split("<main")[0]).lower()  # drop cache-bust hashes
-    assert "chart.js" not in html.lower() and "d3" not in head
+    srcs = re.findall(r"<script[^>]*\bsrc=[\"']([^\"']+)", html, re.I)  # loaded scripts only
+    paths = [x.split("?")[0].lower() for x in srcs]  # ignore cache-bust hashes
+    assert not [x for x in paths if "d3" in x or "chart" in x]
 
 
 def test_nav_has_both_links(web):

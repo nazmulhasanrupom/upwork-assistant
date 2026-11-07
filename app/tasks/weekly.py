@@ -22,6 +22,7 @@ from typing import Any
 
 from app import mail, notes, playbook, profile_loop, rank, reports, skills, trends
 from app import profile_versions as pv
+from app.base_url import get_base_url
 from app.config import Config, load_config
 from app.db import init_db
 from app.llm import prompting
@@ -223,7 +224,7 @@ def _work(conn, settings, config, now, result: WeeklyResult) -> None:
             lines.append("A profile change waits in Approvals. Nothing changes until you approve.")
         text, html = mail.build_email(
             f"Weekly report {period}", lines, link_path=f"/reports/{result.report_id}",
-            base_url=config.public_base_url, button_label="Open the report",
+            base_url=get_base_url(settings, config), button_label="Open the report",
         )  # fmt: skip
         mail.send_event(conn, "weekly", period, f"Weekly report {period}", text, html,
                         config=config, settings=settings, now=now)  # fmt: skip

@@ -19,6 +19,7 @@ from typing import Any
 
 from app import mail, playbook, reports, trends
 from app import profile_versions as pv
+from app.base_url import get_base_url
 from app.config import Config, load_config
 from app.db import init_db
 from app.llm import prompting
@@ -186,7 +187,7 @@ def _work(conn, settings, config, bridge, now, result: MonthlyResult) -> None:
     if settings.get("monthly.email"):
         text_mail, html = mail.build_email(
             title, [body[:4000]], link_path=f"/reports/{result.report_id}",
-            base_url=config.public_base_url, button_label="Open the report",
+            base_url=get_base_url(settings, config), button_label="Open the report",
         )  # fmt: skip
         mail.send_event(conn, "monthly", stats["month"], title, text_mail, html,
                         config=config, settings=settings, now=now)  # fmt: skip

@@ -40,6 +40,7 @@ from typing import Any
 
 from app import approvals, mail, playbook, rank, skills
 from app import profile_versions as pv
+from app.base_url import get_base_url
 from app.config import Config
 from app.llm import prompting
 from app.llm.runner import BudgetCapReached, ClaudeFailed, ClaudeRateLimited, run_claude
@@ -419,7 +420,7 @@ def notify(conn, config, settings, item_id: int, pick, now) -> str:
             "approve it and then confirm the preview.",
         ],
         link_path="/approvals",
-        base_url=config.public_base_url,
+        base_url=get_base_url(settings, config),
         button_label="Open approvals",
     )
     return mail.send_event(

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import action_status, button, flash, card, pill, page_header, info, icon %}
+{% from "_macros.html" import copy_button, action_status, button, flash, card, pill, page_header, info, icon %}
 {% block title %}Setup{% endblock %}
 {% block main_class %}medium{% endblock %}
 {% block content %}
@@ -28,8 +28,7 @@
   </form>
 {% else %}
   {% set st = steps[idx] %}
-  {% if st.key == "admin" %}{% set tip = info("setup.admin") %}
-  {% elif st.key == "claude" %}{% set tip = info("setup.claude") %}
+  {% if st.key == "claude" %}{% set tip = info("setup.claude") %}
   {% elif st.key == "upwork" %}{% set tip = info("setup.upwork") %}
   {% elif st.key == "profile" %}{% set tip = info("setup.profile") %}
   {% elif st.key == "keywords" %}{% set tip = info("setup.keywords") %}
@@ -41,12 +40,18 @@
   <div id="step-body-{{ st.key }}" class="setup-step">
     <h2 class="wiz-title">{{ idx + 1 }}. {{ st.title }}{{ tip }}
       {% if st.done %}{{ pill("Done", "good") }}{% elif st.optional %}{{ pill("Optional") }}{% else %}{{ pill("To do", "warn") }}{% endif %}</h2>
-    {% if st.key == "admin" %}
-      <p class="muted">The admin account and the authenticator app are set.</p>
-    {% elif st.key == "claude" %}
-      <form method="post" action="/setup/claude">
+    {% if st.key == "claude" %}
+      <ol class="claude-steps">
+        <li>Install Claude Code on your own computer: <code id="cmd-install">npm install -g @anthropic-ai/claude-code</code> {{ copy_button("cmd-install") }}</li>
+        <li>In a terminal run: <code id="cmd-token">claude setup-token</code> {{ copy_button("cmd-token") }}</li>
+        <li>Sign in in the browser window that opens.</li>
+        <li>Copy the token it prints.</li>
+        <li>Paste it below and press Save and check.</li>
+      </ol>
+      <form method="post" action="/setup/claude" class="stack">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        {{ button("Run Claude check", "primary") }}
+        {% include "_claude_fields.html" %}
+        {{ button("Save and check Claude", "primary") }}
       </form>
     {% elif st.key == "upwork" %}
       <p><a class="btn btn-secondary" href="/upwork">Open the Upwork page</a></p>

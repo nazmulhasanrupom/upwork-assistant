@@ -164,7 +164,7 @@ def test_gmail_result_has_no_long_paragraphs(pages):
 
 def test_login_page_has_no_long_paragraphs(config):
     app, client = make_web_client(config)
-    setup_admin(client)
+    setup_admin(client, totp=True)
     client.post("/logout", data={"csrf_token": csrf_from(client.get("/").text)})
     r = client.get("/login")
     assert r.status_code == 200 and 'name="code"' in r.text and 'name="username"' in r.text
@@ -173,26 +173,27 @@ def test_login_page_has_no_long_paragraphs(config):
         "/login",
         data={"username": "x", "password": "y", "code": "1", "csrf_token": csrf_from(r.text)},
     )
-    assert bad.status_code == 401 and "Wrong user name" in bad.text
+    assert bad.status_code == 401 and "Wrong email" in bad.text
     assert long_paragraphs(bad.text) == []
 
 
-def test_setup_admin_and_totp_have_no_long_paragraphs(config):
+def test_setup_admin_and_two_step_have_no_long_paragraphs(config):
     app, client = make_web_client(config)
     r = client.get("/setup")
-    assert r.status_code == 200 and "step 1 of 10" in r.text and long_paragraphs(r.text) == []
-    token = csrf_from(r.text)
+    assert r.status_code == 200 and "Create your account" in r.text
+    assert long_paragraphs(r.text) == []
     client.post(
         "/setup/account",
         data={
-            "username": "u",
+            "email": "u@example.test",
             "password": "a-long-password-12",
             "password2": "a-long-password-12",
-            "setup_code": client.setup_code,
-            "csrf_token": token,
+            "csrf_token": csrf_from(r.text),
         },
     )
-    r = client.get("/setup/totp")
+    page = client.get("/settings")
+    assert 'id="two-step"' in page.text and long_paragraphs(page.text) == []
+    r = client.post("/settings/two-step/start", data={"csrf_token": csrf_from(page.text)})
     assert r.status_code == 200 and long_paragraphs(r.text) == []
 
 

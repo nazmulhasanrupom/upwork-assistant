@@ -8,14 +8,17 @@ decides which buttons are enabled, with a short reason for each disabled one.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
 from app.llm import prompting
+from app.llm.runner import ClaudeError
 from app.settings import Settings
 from app.upwork import writes
+from app.upwork.client import UpworkMCPError
 from app.upwork.jobs import CLOSE_TAG, OPEN_TAG
 
 # Fixed texts for the notice after a redirect (never echo the query string).
@@ -31,6 +34,8 @@ JOB_MESSAGES: dict[str, tuple[str, str]] = {
     "sent": ("ok", "Sent to Upwork."),
     "remade": ("ok", "Fresh preview made. Nothing was sent."),
     "applied": ("warn", "Already applied: Upwork shows a proposal from you for this job."),
+    "auto_stopped": ("ok", "Stopped. Nothing will be sent automatically for this job."),
+    "auto_late": ("warn", "Too late: this countdown was already stopped, sent or cancelled."),
     "skipped": ("info", "Job skipped."),
     "unskipped": ("info", "Job is back in the list."),
 }
@@ -121,6 +126,36 @@ def check_draft_input(
 
 
 # ---------------------------------------------------------------- highlights
+
+
+log = logging.getLogger("job.actions")
+
+
+def fetch_highlights(reader: Any, org: str, limit: int) -> list[dict[str, Any]] | None:
+    """`get_profile list_highlights` through the READ bridge. None when it cannot be read."""
+    try:
+        res = reader.call_many(
+            [("get_profile", {"action": "list_highlights", "org_uid": org, "params": {}})]
+        )[0]
+        if res.is_error:
+            return None
+        return parse_highlights(res.data(), limit)
+    except (UpworkMCPError, ClaudeError):
+        log.info("Highlights could not be read", exc_info=True)
+        return None
+
+
+def highlight_extra(items: list[dict[str, Any]] | None, count: int) -> dict[str, list[str]]:
+    """manage_proposals extras for the first `count` highlights that can be added."""
+    extra: dict[str, list[str]] = {}
+    taken = 0
+    for h in items or []:
+        if taken >= count:
+            break
+        if h.get("param") and h.get("id"):
+            extra.setdefault(h["param"], []).append(h["id"])
+            taken += 1
+    return extra
 
 
 def parse_highlights(payload: Any, limit: int) -> list[dict[str, Any]]:

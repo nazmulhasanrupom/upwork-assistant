@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any
 
+from app import proposal_rules
 from app.config import Config, load_config
 from app.llm import prompting
 from app.llm.runner import BudgetCapReached, ClaudeFailed, ClaudeRateLimited, run_claude
@@ -30,8 +31,12 @@ log = logging.getLogger("judging")
 
 JUDGE_PROMPT = "prompts/judge.md"
 WRITE_PROMPT = "prompts/write_proposal.md"
+FIX_PROMPT = "prompts/fix_proposal.md"
 TASK_JUDGE = "judge"
 TASK_WRITE = "write"
+TASK_FIX = "fix_rules"
+WIN_CHANCES = ("low", "medium", "high")
+CLIENT_QUALITIES = ("poor", "ok", "good")
 ALERT_USER_MD = "user_md_missing"
 ALERT_USER_MD_TEXT = "Add your profile facts (USER.md) to get drafts"
 COVER_LETTER_MAX = 5000
@@ -231,6 +236,33 @@ def _pending_write(conn: sqlite3.Connection, fit_min: int, cutoff: str) -> list[
     ).fetchall()
 
 
+def _bool_or_none(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "yes", "false", "no"):
+        return value.strip().lower() in ("true", "yes")
+    return None
+
+
+def _choice_or_none(value: Any, allowed: tuple[str, ...]) -> str | None:
+    text = str(value).strip().lower() if isinstance(value, str) else ""
+    return text if text in allowed else None
+
+
+def eligibility_fields(item: dict[str, Any]) -> dict[str, Any]:
+    """The judge's auto-send answers. A missing or odd field is None: never eligible."""
+    reasons = {
+        key: prompting.no_em_dash(str(item.get(f"{key}_reason") or "")).strip()[:300]
+        for key in ("skills_match", "win_chance", "client_quality")
+    }
+    return {
+        "skills_match_all": _bool_or_none(item.get("skills_match_all")),
+        "win_chance": _choice_or_none(item.get("win_chance"), WIN_CHANCES),
+        "client_quality": _choice_or_none(item.get("client_quality"), CLIENT_QUALITIES),
+        "reasons": {k: v for k, v in reasons.items() if v},
+    }
+
+
 def _save_judgement(
     conn: sqlite3.Connection,
     item: dict[str, Any],
@@ -259,9 +291,11 @@ def _save_judgement(
         "tier": row["tier"],
         "model": model,
     }
+    elig = eligibility_fields(item)
     cur = conn.execute(  # a job is judged only once: a second insert is ignored
         "INSERT OR IGNORE INTO judgements(job_id, run_id, fit_score, why_apply, risks, plan, "
-        "suggested_rate) VALUES (?,?,?,?,?,?,?)",
+        "suggested_rate, skills_match_all, win_chance, client_quality, eligibility_reasons) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (
             row["job_id"],
             run_id,
@@ -270,6 +304,10 @@ def _save_judgement(
             "\n".join(risks),
             json.dumps(plan, ensure_ascii=False),
             rate,
+            None if elig["skills_match_all"] is None else int(elig["skills_match_all"]),
+            elig["win_chance"],
+            elig["client_quality"],
+            json.dumps(elig["reasons"], ensure_ascii=False),
         ),
     )
     if cur.rowcount == 0:
@@ -289,6 +327,9 @@ def _save_judgement(
         "connects_cost": row["connects_cost"],
         "connects_balance": balance,
         "suggested_rate": rate,
+        "skills_match_all": elig["skills_match_all"],
+        "win_chance": elig["win_chance"],
+        "client_quality": elig["client_quality"],
         "drafted": False,
     }
 
@@ -359,6 +400,48 @@ def _draft_fields(
     }
 
 
+def _fix_rules(
+    runner: _Runner, fields: dict[str, Any], problems: list[str]
+) -> tuple[dict[str, Any], list[str]]:
+    """One Claude rewrite with the problem list. Returns (fields, problems left).
+
+    The rewrite is used only when it is not worse and still fits the Upwork limit. Raises _Stop
+    when Claude is capped or rate limited (the caller saves the draft first).
+    """
+    out = runner.call(
+        TASK_FIX,
+        FIX_PROMPT,
+        {
+            "draft": {
+                "cover_letter": fields["cover_letter"],
+                "screening_answers": fields["answers"],
+            },
+            "problems": problems,
+        },
+        "write",
+    )
+    if not isinstance(out, dict):
+        return fields, problems
+    letter = prompting.no_em_dash(str(out.get("cover_letter") or "")).strip()
+    given = out.get("screening_answers")
+    answers = []
+    for i, old in enumerate(fields["answers"]):
+        new = given[i] if isinstance(given, list) and i < len(given) else None
+        text = new.get("answer") if isinstance(new, dict) else None
+        answers.append(
+            {
+                "question": old["question"],
+                "answer": prompting.no_em_dash(str(text)).strip() if text else old["answer"],
+            }
+        )
+    if not letter or len(letter) > COVER_LETTER_MAX:
+        return fields, problems
+    left = proposal_rules.check_draft(letter, answers)
+    if len(left) > len(problems):
+        return fields, problems
+    return {**fields, "cover_letter": letter, "answers": answers}, left
+
+
 def _write_step(runner: _Runner, rows: list[sqlite3.Row], run_id: str | None) -> None:
     conn, s, result = runner.conn, runner.settings, runner.result
     size = max(1, int(s.get("claude.max_proposals_per_write_call")))
@@ -386,6 +469,7 @@ def _write_step(runner: _Runner, rows: list[sqlite3.Row], run_id: str | None) ->
         )
         if out is None:
             continue
+        stop = False
         for item in _items(out, "proposals"):
             row = by_id.get(str(item.get("job_id")))
             if row is None:
@@ -396,9 +480,18 @@ def _write_step(runner: _Runner, rows: list[sqlite3.Row], run_id: str | None) ->
                 continue
             if conn.execute("SELECT 1 FROM drafts WHERE job_id = ?", (row["job_id"],)).fetchone():
                 continue
+            problems = proposal_rules.check_draft(fields["cover_letter"], fields["answers"])
+            if problems and not stop:  # one rewrite pass; what is left blocks auto-send
+                try:
+                    fields, problems = _fix_rules(runner, fields, problems)
+                except _Stop:
+                    stop = True
+            if problems:
+                fields["flags"] = [*fields["flags"], "Breaks the proposal rules, see the warning"]
             conn.execute(
                 "INSERT INTO drafts(job_id, cover_letter, answers, materials, edited_by_user, "
-                "suggested_rate, flags, created_at, run_id) VALUES (?,?,?,?,0,?,?,?,?)",
+                "suggested_rate, flags, created_at, run_id, rules_ok, rules_problems) "
+                "VALUES (?,?,?,?,0,?,?,?,?,?,?)",
                 (
                     row["job_id"],
                     fields["cover_letter"],
@@ -408,6 +501,8 @@ def _write_step(runner: _Runner, rows: list[sqlite3.Row], run_id: str | None) ->
                     json.dumps(fields["flags"], ensure_ascii=False),
                     _iso(datetime.now(UTC)),
                     run_id,
+                    0 if problems else 1,
+                    json.dumps(problems, ensure_ascii=False),
                 ),
             )
             conn.execute(
@@ -421,6 +516,8 @@ def _write_step(runner: _Runner, rows: list[sqlite3.Row], run_id: str | None) ->
             if fields["flags"]:
                 note = f"draft for {row['job_id']} flagged: {fields['flags'][0]}"
                 result.notes.append(note[:300])
+        if stop:
+            raise _Stop
 
 
 # ---------------------------------------------------------------- entry point

@@ -36,6 +36,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app import approvals, mail, metrics, rank
+from app.base_url import get_base_url
 from app.config import Config
 from app.llm import prompting
 from app.llm.runner import (
@@ -462,7 +463,7 @@ def notify(
         ],
         items=items,
         link_path="/approvals",
-        base_url=config.public_base_url,
+        base_url=get_base_url(settings, config),
         button_label="Open approvals",
     )
     return mail.send_event(

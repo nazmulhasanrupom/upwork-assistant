@@ -1,0 +1,25 @@
+{# The auto-send countdown card (round 3). Used on To do and on the job page. The server deadline is the truth; autosend.js only redraws the clock. #}
+{% from "_macros.html" import pill, info, icon %}
+{% macro auto_card(a, csrf_token, dry_run=false, show_title=true) %}
+<section class="card auto-card" id="auto-{{ a.job_id }}" aria-label="Auto-send countdown">
+  <div class="card-head">{{ icon("send") }} {{ pill("Auto-send", "warn") }}
+    <span class="auto-clock">Sends in <strong class="auto-timer" data-deadline="{{ a.deadline }}" role="timer">{{ a.timer }}</strong></span></div>
+  {% if show_title %}<h3 class="card-job-title"><a href="{{ a.link }}">{{ a.title }}</a></h3>{% endif %}
+  <p class="small writes"><strong>Sends on Upwork automatically when the timer ends.</strong>{{ info("auto_send.countdown") }}</p>
+  <p class="small muted">Costs {{ a.connects_cost if a.connects_cost is not none else "n/a" }} Connects{% if a.connects_balance is not none %} of {{ a.connects_balance }}{% endif %}. If you do nothing, the app confirms it itself and records that as the system, not you.{{ info("auto_send.system") }}</p>
+  {% if dry_run %}<p class="small">{{ pill("Dry-run is on: nothing will be sent", "warn") }}</p>{% endif %}
+  {% if a.cover_letter %}
+  <details class="auto-letter"><summary>Read the proposal</summary><pre class="text">{{ a.cover_letter }}</pre></details>
+  {% endif %}
+  <div class="actions auto-actions">
+    <form method="post" action="/jobs/{{ a.job_id }}/auto/approve" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn btn-primary" type="submit">Approve and send now</button>
+    </form>
+    <form method="post" action="/jobs/{{ a.job_id }}/auto/stop" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn btn-danger" type="submit">Stop</button>
+    </form>
+  </div>
+</section>
+{% endmacro %}

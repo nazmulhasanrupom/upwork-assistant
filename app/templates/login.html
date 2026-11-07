@@ -9,9 +9,9 @@
 {% if error %}{{ flash("error", error) }}{% endif %}
 <form method="post" action="/login" class="stack">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label class="field"><span>User name</span><input name="username" autocomplete="username" required autofocus></label>
+  <label class="field"><span>Email</span><input name="username" autocomplete="username" required autofocus></label>
   <label class="field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
-  <label class="field"><span>Authenticator code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" required></label>
+  {% if totp %}<label class="field"><span>Authenticator code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" required></label>{% endif %}
   {{ button("Log in", "primary") }}
 </form>
 {% endcall %}

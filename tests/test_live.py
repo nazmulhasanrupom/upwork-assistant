@@ -32,7 +32,7 @@ def settings(conn):
 
 
 def env_for(config, **extra):
-    env = runner.claude_env(config)
+    env = runner.claude_env(config, None)
     env.update({k: str(v) for k, v in extra.items()})
     return env
 

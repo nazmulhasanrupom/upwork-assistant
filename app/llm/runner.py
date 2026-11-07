@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app import claude_auth
 from app.config import Config
 from app.llm import live
 from app.llm.live import ClaudeCancelled  # noqa: F401 - re-exported
@@ -89,7 +90,7 @@ def claude_config_dir(config: Config | None = None, settings: Settings | None = 
     return base / "claude"
 
 
-def claude_env(config: Config | None = None) -> dict[str, str]:
+def claude_env(config: Config | None, settings: Settings | None) -> dict[str, str]:
     """Environment for the claude child process. Passes the token or key through.
 
     CLAUDE_CONFIG_DIR is always set. Judge/write runs use --strict-mcp-config with an empty
@@ -98,10 +99,7 @@ def claude_env(config: Config | None = None) -> dict[str, str]:
     env = dict(os.environ)
     env["CLAUDE_CONFIG_DIR"] = str(claude_config_dir(config))
     if config is not None:
-        if config.claude_code_oauth_token:
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = config.claude_code_oauth_token
-        if config.anthropic_api_key:
-            env["ANTHROPIC_API_KEY"] = config.anthropic_api_key
+        claude_auth.apply(env, settings, config)  # env value wins, else the saved one
     return env
 
 
@@ -313,7 +311,7 @@ def run_claude(
         proc = live.run_process(
             cmd,
             cwd=run_dir,
-            env=claude_env(config),
+            env=claude_env(config, settings),
             timeout=timeout,
             conn=conn,
             data_dir=config.data_dir,

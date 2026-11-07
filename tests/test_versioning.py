@@ -3,11 +3,10 @@
 import shutil
 import subprocess
 
-import pyotp
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, crypto, memory, playbook, versioning
+from app import auth, memory, playbook, versioning
 from app.db import init_db
 from app.main import create_app
 from app.settings import Settings
@@ -186,14 +185,7 @@ def client(config):
 
     app = create_app(config)
     conn = app.state.db
-    secret = pyotp.random_base32()
-    auth.create_admin(
-        conn,
-        "owner",
-        auth.hash_password("correct horse battery"),
-        crypto.encrypt(config.secret_key, secret),
-    )
-    auth.finish_setup(conn)
+    auth.create_admin(conn, "owner", auth.hash_password("correct horse battery"))
     c = TestClient(app, base_url="https://testserver")
     token = re.search(r'name="csrf_token" value="([^"]+)"', c.get("/login").text).group(1)
     r = c.post(
@@ -201,7 +193,6 @@ def client(config):
         data={
             "username": "owner",
             "password": "correct horse battery",
-            "code": pyotp.TOTP(secret).now(),
             "csrf_token": token,
         },
         follow_redirects=False,

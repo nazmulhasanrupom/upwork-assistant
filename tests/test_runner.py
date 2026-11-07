@@ -211,4 +211,31 @@ def test_judge_run_uses_claude_config_dir_but_no_upwork_tools(
 
 def test_config_dir_defaults_to_data_claude(config, monkeypatch):
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-    assert runner.claude_env(config)["CLAUDE_CONFIG_DIR"] == str(config.data_dir / "claude")
+    assert runner.claude_env(config, None)["CLAUDE_CONFIG_DIR"] == str(config.data_dir / "claude")
+
+
+def test_saved_token_reaches_child_without_env_token(config, conn, prompt, fake_claude):
+    from app import claude_auth
+
+    claude_auth.save(Settings(conn), config, claude_auth.TOKEN_KEY, "saved-not-real")
+    call(config, conn, prompt, settings=Settings(conn))
+    assert fake_claude.log()["has_oauth"]
+    # task-process path: no settings passed, loaded from the DB
+    call(config, conn, prompt)
+    assert fake_claude.log()["has_oauth"]
+
+
+def test_no_saved_and_no_env_token_means_none(config, conn, prompt, fake_claude):
+    call(config, conn, prompt)
+    assert not fake_claude.log()["has_oauth"]
+
+
+def test_env_token_wins_over_saved_in_child_env(config, conn):
+    from dataclasses import replace
+
+    from app import claude_auth
+
+    s = Settings(conn)
+    claude_auth.save(s, config, claude_auth.TOKEN_KEY, "saved-not-real")
+    cfg = replace(config, claude_code_oauth_token="env-not-real")
+    assert runner.claude_env(cfg, s)["CLAUDE_CODE_OAUTH_TOKEN"] == "env-not-real"

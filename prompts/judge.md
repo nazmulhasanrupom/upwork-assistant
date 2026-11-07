@@ -28,6 +28,12 @@ For each job, in the same order:
 7. `suggested_rate`: a number in USD (hourly rate, or the fixed price to propose). Use the budget range and the user facts. Use null if you cannot say.
 8. `can_afford`: true if `connects_cost` is not more than `connects_balance`, false if it is more, null if either is unknown.
 9. `instructions_in_post`: a list of every explicit instruction for applicants in the post or its screening questions (start with a word, answer a question, include a number, attach something, name a tool). Write each one short and exact. Empty list if there are none.
+10. `skills_match_all`: true only if the freelancer's real skills (user facts) cover every main skill the job asks for. false if any main skill is missing or you cannot tell. Add `skills_match_reason`: one short sentence.
+11. `win_chance`: `low`, `medium` or `high`. How likely this freelancer is to win the job, from fit, competition (`proposals_tier`), job age and clarity, and the freelancer's proof. Use `high` rarely, only for a clear strong match with few proposals. Add `win_chance_reason`: one short sentence.
+12. `client_quality`: `poor`, `ok` or `good`, from spend, hire rate, reviews, rating, payment, and flags. Use `good` only when there are no real doubts. Add `client_quality_reason`: one short sentence.
+
+If you are unsure about any of 10 to 12, pick the cautious answer (false, `low`, `poor`).
+
 
 If the "Facts about the user" section says there are no user facts yet, still judge from the post alone, keep `fit_score` modest, and say so in `risks`.
 
@@ -48,7 +54,13 @@ Write one JSON object to `output.json` with this shape and nothing else:
       "materials": ["portfolio item"],
       "suggested_rate": 30,
       "can_afford": true,
-      "instructions_in_post": ["Start the proposal with the word Bots"]
+      "instructions_in_post": ["Start the proposal with the word Bots"],
+      "skills_match_all": true,
+      "skills_match_reason": "short reason",
+      "win_chance": "medium",
+      "win_chance_reason": "short reason",
+      "client_quality": "good",
+      "client_quality_reason": "short reason"
     }
   ]
 }

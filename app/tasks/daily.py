@@ -21,7 +21,7 @@ from datetime import UTC, datetime, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from app import alerts, mail, memory, metrics, notes, profile_loop, rank
+from app import alerts, auto_send_flow, mail, memory, metrics, notes, profile_loop, rank
 from app import profile_versions as profile_versions_mod
 from app.config import Config, load_config
 from app.db import init_db
@@ -574,6 +574,19 @@ def _process(
                 settings=settings,
                 now=now,
             )
+    # Round 3: an excellent job starts an auto-send countdown (nothing is sent here: a preview,
+    # a countdown row and an email). It does nothing while dry-run or the kill switch is on.
+    try:
+        started = auto_send_flow.start_countdowns(
+            conn, settings, config, client, [i["job_id"] for i in judged.judged], now=now
+        )
+        if started:
+            oddities.append(f"auto-send: {len(started)} countdown(s) started")
+    except ClaudeCancelled:
+        raise
+    except Exception:
+        log.exception("Auto-send could not start")
+        oddities.append("auto-send: could not start (see the log)")
     return balance
 
 

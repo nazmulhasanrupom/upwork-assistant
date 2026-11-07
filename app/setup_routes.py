@@ -1,27 +1,27 @@
 """First-run setup wizard `/setup` (SPEC 4.2, plan J1).
 
-Step 1 (admin account + authenticator) is the only part open without a login, and only while no
-admin exists. Once an admin exists every step that creates one answers 404 (no takeover). The other
+Step 1 (create the account: email + password) is the only part open without a login, and only
+while no admin exists. Once an admin exists it answers 404 (no takeover). 2-step login is optional
+and lives in Settings. The other
 steps need login + CSRF (the app-wide guard). The wizard does not redo work that has its own page:
 it links to /upwork, /context and /settings/email, and keeps the progress in the `setup.*` settings.
 
 - GET  /setup            no admin: step 1 form. Admin but not logged in: /login. Else the checklist.
-- POST /setup/account    step 1a: setup code, user name, password (hashed with argon2)
-- GET  /setup/totp       step 1b: authenticator QR (a new secret on every load until confirmed)
-- POST /setup/confirm    step 1c: first code creates the admin and logs in
-- POST /setup/claude     step 2: run the Claude check
+- POST /setup/account    step 1: email + password (argon2) -> admin, logged in, redirect to /
+- POST /setup/claude     step 1: save the pasted token/key (encrypted), run the Claude check
 - POST /setup/keywords   step 5 | POST /setup/pay  step 6 | POST /setup/schedule  step 9
 - POST /setup/style      step 7: keep the default writing style
 - POST /setup/skip/{key} skip an optional step (email)
 - POST /setup/dryrun     step 10: dry-run ON (never turns it off)
 - POST /setup/finish     all required steps done
-- GET  /setup/admin[...] old URLs: redirect
+- GET  /setup/admin[...], /setup/totp  old URLs: redirect to /setup
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -30,7 +30,7 @@ from croniter import croniter
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import auth, crypto
+from app import auth, claude_auth
 from app.auth_routes import render
 from app.gmail import Gmail
 from app.memory import memory_file, read_file
@@ -44,7 +44,6 @@ router = APIRouter()
 
 # key, title, what to do. "link" steps have their own page; "inline" steps have a form here.
 STEPS: tuple[dict[str, str], ...] = (
-    {"key": "admin", "title": "Admin account", "kind": "admin"},
     {"key": "claude", "title": "Claude check", "kind": "inline"},
     {"key": "upwork", "title": "Connect Upwork", "kind": "link", "link": "/upwork"},
     {"key": "profile", "title": "Build profile context", "kind": "link", "link": "/context"},
@@ -86,7 +85,6 @@ def _closed(request: Request) -> None:
 def done_keys(request: Request) -> set[str]:
     s = request.app.state
     done = {str(k) for k in s.settings.get("setup.done_steps")}
-    done.add("admin")  # a logged-in user means the admin exists
     if accounts.current(s.settings) is not None:
         done.add("upwork")
     if read_file(memory_file(s.config, "USER.md")).strip():
@@ -97,6 +95,14 @@ def done_keys(request: Request) -> set[str]:
     except Exception:
         log.exception("Could not read the Gmail state")
     return done
+
+
+def progress(request: Request) -> dict[str, int]:
+    """Required steps done / total, for the top bar. Optional steps are not counted."""
+    done = done_keys(request)
+    keys = [st["key"] for st in STEPS if st["key"] not in OPTIONAL]
+    n = sum(1 for k in keys if k in done)
+    return {"done": n, "total": len(keys), "percent": round(100 * n / len(keys)) if keys else 100}
 
 
 def mark_done(request: Request, key: str) -> None:
@@ -142,6 +148,9 @@ def _hub(request: Request, status: int = 200, **ctx: Any) -> Response:
         pay_values={k: st.get(k) for k in PAY_KEYS},
         schedule_values={k: st.get(k) for k in SCHEDULE_KEYS},
         timezone=st.get("general.timezone"),
+        claude_token_hint=claude_auth.hint(st, s.config, claude_auth.TOKEN_KEY),
+        claude_key_hint=claude_auth.hint(st, s.config, claude_auth.API_KEY),
+        claude_from_env=bool(s.config.claude_code_oauth_token or s.config.anthropic_api_key),
         dry_run=bool(st.get("general.dry_run")),
         **ctx,
     )
@@ -169,113 +178,68 @@ def old_setup_admin() -> Response:
 
 
 @router.get("/setup/admin/totp")
+@router.get("/setup/totp")
 def old_setup_totp() -> Response:
-    return _redirect("/setup/totp")
+    return _redirect("/setup")
 
 
-# ---------- step 1: admin ----------
+# ---------- step 1: create the account ----------
 
-
-def _totp_page(request: Request, pending: dict, error: str = "", status: int = 200) -> Response:
-    secret = crypto.decrypt(request.app.state.config.secret_key, pending["s"])
-    return render(
-        request,
-        "setup_totp.html",
-        status,
-        otpauth_url=(url := auth.provisioning_uri(secret, pending["u"])),
-        qr_svg=auth.qr_svg(url),
-        totp_secret=secret,
-        error=error,
-    )
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+EMAIL_MAX = 254
 
 
 @router.post("/setup/account")
 def setup_account(
     request: Request,
-    username: str = Form(""),
+    email: str = Form(""),
     password: str = Form(""),
     password2: str = Form(""),
-    setup_code: str = Form(""),
 ):
+    """The first visitor makes the account (email + password) and is logged in. Closed (404)
+    once an admin exists. 2-step login starts off; it is turned on in Settings."""
     conn: sqlite3.Connection = request.app.state.db
     _closed(request)
-    # The panel may be on a public domain before the admin exists: check the code first.
-    left = auth.lock_seconds_remaining(conn)
-    if left:
-        minutes = max(1, -(-left // 60))
-        msg = f"Too many wrong setup codes. Try again in about {minutes} minute(s)."
-        return _admin_page(request, 429, msg)
-    if not auth.check_setup_code(conn, request.app.state.config.secret_key, setup_code):
-        auth.record_failure(conn, request.app.state.settings)
-        msg = "The setup code is missing or wrong. Find it in the container log (SETUP CODE)."
-        return _admin_page(request, 403, msg)
-    username = username.strip()
+    email = email.strip().lower()
     min_len = request.app.state.settings.get("security.password_min_length")
     error = ""
-    if not username or len(username) > 64:
-        error = "Enter a user name (up to 64 characters)."
+    if len(email) > EMAIL_MAX or not EMAIL_RE.match(email):
+        error = "Enter a valid email address."
     elif len(password) < min_len:
         error = f"The password needs at least {min_len} characters."
     elif password != password2:
         error = "The two passwords are not the same."
     if error:
         return _admin_page(request, 400, error)
-    key = request.app.state.config.secret_key
-    pending = {
-        "u": username,
-        "h": auth.hash_password(password),
-        "s": crypto.encrypt(key, auth.new_totp_secret()),
-    }
-    auth.load_session(request).set("pending", pending)
-    return _redirect("/setup/totp")
-
-
-@router.get("/setup/totp")
-def setup_totp(request: Request):
-    """Every load makes a NEW secret until the code is confirmed, so a reloaded page never
-    shows a key that was seen (and maybe leaked) before."""
-    _closed(request)
-    session = auth.load_session(request)
-    pending = session.data.get("pending")
-    if not pending:
-        return _redirect("/setup")
-    key = request.app.state.config.secret_key
-    pending = {**pending, "s": crypto.encrypt(key, auth.new_totp_secret())}
-    session.set("pending", pending)
-    return _totp_page(request, pending)
-
-
-@router.post("/setup/confirm")
-def setup_confirm(request: Request, code: str = Form("")):
-    conn: sqlite3.Connection = request.app.state.db
-    _closed(request)
-    session = auth.load_session(request)
-    pending = session.data.get("pending")
-    if not pending:
-        return _redirect("/setup")
-    key = request.app.state.config.secret_key
-    if not auth.verify_totp(crypto.decrypt(key, pending["s"]), code):
-        return _totp_page(request, pending, "That code is wrong. Try the next one.", 400)
     try:
-        auth.create_admin(conn, pending["u"], pending["h"], pending["s"])
+        auth.create_admin(conn, email, auth.hash_password(password))
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=404) from None
-    auth.finish_setup(conn)
-    session.login(pending["u"])
-    return _redirect("/setup")
+    auth.record_success(conn)
+    auth.load_session(request).login(email)
+    return _redirect("/")
 
 
 # ---------- step 2: Claude ----------
 
 
+def save_claude_fields(request: Request, token: str, api_key: str) -> None:
+    """Save what was pasted (empty = keep what is saved). Values are stored encrypted."""
+    s = request.app.state
+    for key, plain in ((claude_auth.TOKEN_KEY, token), (claude_auth.API_KEY, api_key)):
+        plain = plain.strip()
+        if plain:
+            claude_auth.save(s.settings, s.config, key, plain[: claude_auth.VALUE_MAX])
+
+
 @router.post("/setup/claude")
-def setup_claude(request: Request) -> Response:
+def setup_claude(
+    request: Request, oauth_token: str = Form(""), api_key: str = Form("")
+) -> Response:
     config = request.app.state.config
+    save_claude_fields(request, oauth_token, api_key)
     env = dict(os.environ)
-    if config.claude_code_oauth_token:
-        env["CLAUDE_CODE_OAUTH_TOKEN"] = config.claude_code_oauth_token
-    if config.anthropic_api_key:
-        env["ANTHROPIC_API_KEY"] = config.anthropic_api_key
+    claude_auth.apply(env, request.app.state.settings, config)
 
     def work(ctx: Any) -> tuple[str, str]:
         # the message never holds the token

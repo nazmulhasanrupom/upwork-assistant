@@ -20,7 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from app import approvals, keywords, playbook, profile_loop
+from app import approvals, auto_send, keywords, playbook, profile_loop
 from app import profile_versions as pv
 from app.auth_routes import render
 from app.tasks import lock, trigger
@@ -95,6 +95,7 @@ def _page(
         status,
         proposals=[] if kind and kind != "proposal" else approvals.open_previews(s.db, s.settings),
         proposal_count=len(approvals.open_previews(s.db, s.settings)),
+        auto_cards=[] if kind and kind != "auto_send" else auto_send.waiting_cards(s.db),
         items=[it for it in items if not kind or it["kind"] == kind],
         all_items=items,
         kind=kind,

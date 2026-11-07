@@ -13,10 +13,14 @@ In the `/data` volume on your server only:
 - SQLite database (jobs, drafts, previews, settings, run logs).
 - Upwork and Gmail tokens, and the Claude config.
 - Memory and skill files, with git history.
-- Admin password hash and TOTP secret.
+- Admin password hash, and the TOTP secret if you turn on 2-step login (optional, with a
+  reminder after 7 days).
+- `secret_key`: made on first start. It encrypts the saved tokens and signs sessions. Back it
+  up with the volume; without it saved tokens cannot be read.
+- Claude token and API key, if you paste them in the app: stored encrypted, never shown back.
 
 Nothing is sent to the project authors. Claude and Upwork get only what each
-call needs. Keep `.env` and `/data` private and back them up safely.
+call needs. Keep `/data` (and `.env`, if you use one) private and back them up safely.
 
 ## Safety design
 

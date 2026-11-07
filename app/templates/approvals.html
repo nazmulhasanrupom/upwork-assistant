@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import action_status, button, flash, pill, info, icon, page_header, empty %}
+{% from "_auto_send.html" import auto_card %}
 {% set write_kinds = ["profile_change", "profile_rollback", "profile"] %}
 {% set kind_icons = {"keywords": "search", "profile_change": "file-text", "profile_rollback": "history", "profile": "file-text", "playbook_update": "list-todo", "skill_patch": "check-square"} %}
 {% block title %}To do{% endblock %}
@@ -16,6 +17,13 @@
 {% if action_id %}<div class="action-line" id="approvals-action">{{ action_status(action_id) }}</div>{% endif %}
 {% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
 {% if dry_run %}{{ flash("warn", "Dry-run is on. An approved proposal is blocked at the last step and only logged.") }}{% endif %}
+
+{% if auto_cards %}
+<section class="auto-list" aria-label="Auto-send countdowns" id="auto-list">
+  <h2 class="sub">Auto-send countdowns{{ info("auto_send.card") }}</h2>
+  {% for a in auto_cards %}{{ auto_card(a, csrf_token, dry_run) }}{% endfor %}
+</section>
+{% endif %}
 
 {% set kinds = all_items | map(attribute="kind") | unique | list %}
 {% if kinds or proposal_count %}
@@ -108,7 +116,7 @@
     {% endif %}
     {% endfor %}
   </ul>
-  {% else %}
+  {% elif not auto_cards %}
   {{ empty("check-square", "Nothing is waiting for you.") }}
   {% endif %}
 </section>

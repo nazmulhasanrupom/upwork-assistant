@@ -31,8 +31,8 @@ def check(
     env = dict(os.environ if env is None else env)
     if not env.get("CLAUDE_CODE_OAUTH_TOKEN") and not env.get("ANTHROPIC_API_KEY"):
         return False, (
-            "NO TOKEN: set CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) "
-            "or ANTHROPIC_API_KEY in .env."
+            "NO TOKEN: paste the token from `claude setup-token` on the Claude step "
+            "(or in Settings, Claude)."
         )
     try:
         with tempfile.TemporaryDirectory() as workdir:
@@ -67,7 +67,11 @@ def check(
     if data is not None and data.get("api_error_status") == 429 or looks_rate_limited(text):
         return False, "RATE LIMIT: Claude hit a 429 or session limit. Try again later."
     if looks_like_auth_error(text):
-        return False, "BAD TOKEN: Claude refused the login. Make a new token and update .env."
+        return (
+            False,
+            "BAD TOKEN: Claude refused the login. "
+            "Make a new token with `claude setup-token` and paste it again.",
+        )
     return False, f"ERROR: claude failed (exit code {proc.returncode}). {detail[:300]}"
 
 

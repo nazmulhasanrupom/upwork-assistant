@@ -16,8 +16,7 @@ from tests.test_auth import make_client as make_web_client
 @pytest.fixture
 def web(config):
     app, client = make_web_client(config)
-    secret = setup_admin(client)
-    client.totp = secret
+    client.totp = setup_admin(client, totp=True)  # the delete form then asks for a code too
     return app, client
 
 
@@ -273,7 +272,8 @@ def count(app, table):
 
 
 def wipe(client, **over):
-    data = {"phrase": sr.CONFIRM_PHRASE, "password": PASSWORD, "code": ""}
+    code = pyotp.TOTP(client.totp).now() if getattr(client, "totp", "") else ""
+    data = {"phrase": sr.CONFIRM_PHRASE, "password": PASSWORD, "code": code}
     data.update(over)
     return post(client, "/settings/delete-all", **data)
 
@@ -295,22 +295,36 @@ def test_delete_with_password(web, config):
     assert page.status_code == 200 and "/setup/account" in page.text
 
 
-def test_delete_with_totp_only(web, config):
+def test_delete_with_totp_needs_password_and_code(web, config):
     app, client = web
     seed(app, config)
-    r = wipe(client, password="", code=pyotp.TOTP(client.totp).now())
+    code = pyotp.TOTP(client.totp).now
+    for pw, c in (("", code()), (PASSWORD, ""), (PASSWORD, "000000"), ("wrong wrong", code())):
+        assert wipe(client, password=pw, code=c).status_code == 403
+    assert count(app, "admin") == 1 and (config.data_dir / "tokens.enc").exists()
+    r = wipe(client, password=PASSWORD, code=code())
     assert r.status_code == 303
     assert count(app, "admin") == 0 and not (config.data_dir / "tokens.enc").exists()
 
 
-def test_after_delete_a_new_owner_can_set_up(web, config):
-    app, client = web
-    wipe(client)
-    from app import auth
-
-    client.setup_code = auth.issue_setup_code(app.state.db, config.secret_key)
-    client.cookies.clear()
+def test_delete_without_totp_needs_only_the_password(config):
+    app, client = make_web_client(config)
     setup_admin(client)
+    assert 'name="code"' not in client.get("/settings").text.split("delete-form")[1]
+    assert wipe(client, password="wrong wrong").status_code == 403
+    assert wipe(client, password="").status_code == 403
+    assert count(app, "admin") == 1
+    assert wipe(client).status_code == 303 and count(app, "admin") == 0
+
+
+def test_after_delete_the_next_visitor_sees_create_account(web, config):
+    app, client = web
+    wipe(client, code=pyotp.TOTP(client.totp).now())
+    client.cookies.clear()
+    page = client.get("/setup")
+    assert page.status_code == 200 and "Create your account" in page.text
+    assert "setup_code" not in page.text
+    setup_admin(client)  # a new owner, no code from any log
     assert count(app, "admin") == 1
 
 

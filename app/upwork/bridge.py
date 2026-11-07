@@ -395,7 +395,7 @@ class ClaudeUpworkBridge:
             len(chunk) + 3,
             float(self.settings.get("claude.fetch_max_budget_usd")),
         )
-        env = claude_env(self.config)
+        env = claude_env(self.config, self.settings)
         env["CLAUDE_CONFIG_DIR"] = str(cfg_dir)
         timeout = int(self.settings.get("claude.fetch_timeout_seconds"))
         log.info("claude fetch: %d call(s) run=%s", len(chunk), fetch_id)

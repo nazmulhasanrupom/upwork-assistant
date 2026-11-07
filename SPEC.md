@@ -168,8 +168,9 @@ The biggest savings come from our design (section 7), not from repos.
 
 Opens automatically when `/data` is empty.
 
-1. **Admin account.** Create password. Scan TOTP code with an authenticator app.
-2. **Claude check.** Runs `claude -p "say ok"`. Shows clear errors if auth fails.
+Before the steps: **Create your account** (email and password, no setup code). 2-step login is optional (Settings). A setup bar at the top shows progress.
+
+1. **Claude.** Paste the token from `claude setup-token` (stored encrypted); optional API key. Runs `claude -p "say ok"`. Shows clear errors if auth fails.
 3. **Connect Upwork.** OAuth login. Pick the freelancer account if there is more than one.
 4. **Build profile context.** Python reads `get_profile` and `list_highlights`. Sonnet drafts `me.md` (skills, best projects, proof points). User edits and saves.
 5. **Search keywords.** Pre-filled from the profile's skills. User edits.
@@ -185,11 +186,11 @@ Env vars are only for secrets and the domain. Everything else is in Settings.
 
 `.env.example`:
 ```
-# Required
-PUBLIC_BASE_URL=https://upwork.example.com
-SECRET_KEY=change-me-long-random-string
+# All optional (no .env needed)
+PUBLIC_BASE_URL=
+SECRET_KEY=
 
-# Claude: set ONE of these
+# Claude: or paste it on the setup page (an env value wins)
 CLAUDE_CODE_OAUTH_TOKEN=
 ANTHROPIC_API_KEY=
 
@@ -198,7 +199,7 @@ TZ=UTC
 LOG_LEVEL=info
 ```
 
-`SECRET_KEY` encrypts Upwork tokens and signs panel sessions.
+`SECRET_KEY` encrypts Upwork tokens and the saved Claude token, and signs panel sessions. If unset, the app makes one and keeps it in `/data/secret_key`.
 
 ### 4.4 Model choice
 
@@ -539,12 +540,12 @@ If the preview expired, the panel makes a new one and asks again.
 ### 10.4 Panel security
 
 - HTTPS (Coolify Traefik, or any reverse proxy).
-- Password plus TOTP code.
+- Password, plus a TOTP code if you turned on 2-step login (optional).
 - Login rate limit. Lock after 5 wrong tries.
 - Session cookie: Secure, HttpOnly, SameSite=Strict.
 - CSRF token on every button that writes.
 - Upwork tokens encrypted at rest with `SECRET_KEY`.
-- App refuses to start if `SECRET_KEY` is missing or still the example value.
+- `SECRET_KEY` comes from the env if set, else from `/data/secret_key` (made on first start, mode 0600).
 - Optional: Tailscale or Cloudflare Access in front.
 
 ---
@@ -712,7 +713,7 @@ python -m app.tasks.scheduler
 | 2 | Thinking and writing calls, cost log, emails | Drafts appear, emails arrive |
 | 3 | Prepare and Approve, invites, messages | A real proposal sent from the panel |
 | 4 | Weekly and monthly tasks, Trends page, profile approvals | First weekly report and profile drafts |
-| 5 | Setup wizard, settings for everything, no personal data in code | A fresh install works with only `.env` filled |
+| 5 | Setup wizard, settings for everything, no personal data in code | A fresh install works with no `.env` |
 | 6 | Public release: docs, CI, image on GHCR, first tagged version | A second person installs it from the README alone |
 
 Build it for the author first (phases 0 to 4), but keep all values in Settings from day 1. This makes phase 5 small.

@@ -74,6 +74,57 @@
   </div>
 </div>
 
+<section class="card" id="claude">
+  <h2 class="card-title">Claude{{ info("settings.claude_login") }}</h2>
+  <p class="muted">Get a token on your own computer with <code>claude setup-token</code>. It is saved encrypted and never shown again.</p>
+  <form method="post" action="/settings/claude" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% include "_claude_fields.html" %}
+    {{ button("Save Claude login", "primary") }}
+  </form>
+  {% if claude_token_hint or claude_key_hint %}
+  <form method="post" action="/settings/claude" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if claude_token_hint %}<button class="btn btn-secondary btn-sm" name="remove" value="token">Remove token</button>{% endif %}
+    {% if claude_key_hint %}<button class="btn btn-secondary btn-sm" name="remove" value="key">Remove API key</button>{% endif %}
+  </form>
+  {% endif %}
+</section>
+
+<section class="card" id="base-url">
+  <h2 class="card-title">Base URL{{ info("settings.base_url") }}</h2>
+  <p>Panel address: <code>{{ base_url or "not known yet" }}</code>. Change it in the General section above (Panel address).</p>
+</section>
+
+<section class="card" id="two-step">
+  <h2 class="card-title">Two-step login{{ info("settings.two_step") }}</h2>
+  {% if two_step.enabled %}
+  <p>Two-step login is <strong>on</strong>. Turn it off with your password and a current code.</p>
+  <form method="post" action="/settings/two-step/disable" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field"><span>Your password</span><input type="password" name="password" autocomplete="current-password" required></label>
+    <label class="field"><span>Current 6 digit code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" required></label>
+    {{ button("Turn off", "secondary") }}
+  </form>
+  {% elif two_step.pending %}
+  <p>Scan the code with an authenticator app, then enter the 6 digit code.</p>
+  <div class="qr">{{ two_step.qr_svg | safe }}</div>
+  <p class="muted qr-help">Can't scan?</p>
+  <p>Key: <code>{{ two_step.secret }}</code></p>
+  <form method="post" action="/settings/two-step/enable" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field"><span>6 digit code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" required></label>
+    {{ button("Confirm and turn on", "primary") }}
+  </form>
+  {% else %}
+  <p>Two-step login is <strong>off</strong>. You log in with your email and password.</p>
+  <form method="post" action="/settings/two-step/start" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Turn on", "primary") }}
+  </form>
+  {% endif %}
+</section>
+
 {% call card("Danger zone", cls="panel danger-zone") %}
   <div class="actions">
     <strong>Export</strong>{{ info("settings.export") }}
@@ -87,9 +138,9 @@
     <label class="field"><span>Type <code>{{ phrase }}</code></span>
       <input name="phrase" autocomplete="off" required></label>
     <label class="field"><span>Your password</span>
-      <input type="password" name="password" autocomplete="current-password"></label>
-    <label class="field"><span>Or a current 6 digit code <span class="hint">(use one of the two)</span></span>
-      <input name="code" inputmode="numeric" autocomplete="one-time-code"></label>
+      <input type="password" name="password" autocomplete="current-password" required></label>
+    {% if two_step.enabled %}<label class="field"><span>Current 6 digit code</span>
+      <input name="code" inputmode="numeric" autocomplete="one-time-code" required></label>{% endif %}
     {{ button("Delete all data", "danger") }}
   </form>
 {% endcall %}

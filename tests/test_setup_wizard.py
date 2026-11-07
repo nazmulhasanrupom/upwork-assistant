@@ -41,7 +41,7 @@ def wiz(config):
 def test_fresh_data_shows_step_one(config):
     app, client = make_client(config)
     r = client.get("/setup")
-    assert r.status_code == 200 and "/setup/account" in r.text and "step 1 of 10" in r.text
+    assert r.status_code == 200 and "/setup/account" in r.text and "Create your account" in r.text
     assert 'id="setup-steps"' not in r.text  # no checklist before the admin exists
 
 
@@ -56,48 +56,24 @@ def test_unauthenticated_pages_go_to_setup_until_admin_exists(config):
 def test_old_urls_redirect(config):
     app, client = make_client(config)
     assert client.get("/setup/admin").headers["location"] == "/setup"
-    assert client.get("/setup/admin/totp").headers["location"] == "/setup/totp"
+    assert client.get("/setup/admin/totp").headers["location"] == "/setup"
+    assert client.get("/setup/totp").headers["location"] == "/setup"
 
 
 def test_no_takeover_after_admin_exists(wiz):
     app, client = wiz
     token = csrf_from(client.get("/setup").text)
-    data = {"username": "evil", "password": PASSWORD, "password2": PASSWORD, "csrf_token": token}
-    assert client.post("/setup/account", data={**data, "setup_code": "x"}).status_code == 404
-    assert (
-        client.post("/setup/confirm", data={"code": "123456", "csrf_token": token}).status_code
-        == 404
-    )
-    assert client.get("/setup/totp").status_code == 404
+    data = {
+        "email": "e@example.com",
+        "password": PASSWORD,
+        "password2": PASSWORD,
+        "csrf_token": token,
+    }
+    assert client.post("/setup/account", data=data).status_code == 404
     # Also without a session
     client.cookies.clear()
     assert client.get("/setup").headers["location"] == "/login"
     assert auth.get_admin(app.state.db)["username"] == USER
-
-
-def test_account_post_needs_csrf(config):
-    app, client = make_client(config)
-    r = client.post(
-        "/setup/account",
-        data={
-            "username": "a",
-            "password": PASSWORD,
-            "password2": PASSWORD,
-            "setup_code": client.setup_code,
-        },
-    )
-    assert r.status_code == 403
-
-
-def test_wrong_setup_code_rejected_and_counted(config):
-    app, client = make_client(config)
-    token = csrf_from(client.get("/setup").text)
-    r = client.post(
-        "/setup/account",
-        data={"username": "a", "password": PASSWORD, "password2": PASSWORD,
-              "setup_code": "wrong", "csrf_token": token},
-    )  # fmt: skip
-    assert r.status_code == 403 and not auth.admin_exists(app.state.db)
 
 
 def test_password_stored_as_hash_only(wiz, caplog):
@@ -109,10 +85,11 @@ def test_password_stored_as_hash_only(wiz, caplog):
 # ---------- the checklist ----------
 
 
-def test_hub_lists_ten_steps_and_only_admin_done(wiz):
+def test_hub_lists_nine_steps_without_an_admin_step(wiz):
     app, client = wiz
     html = client.get("/setup").text
-    assert len(STEPS) == 10
+    assert len(STEPS) == 9 and STEPS[0]["key"] == "claude"
+    assert 'id="step-admin"' not in html
     for st in STEPS:
         assert f'id="step-{st["key"]}"' in html
     assert app.state.settings.get("setup.finished") is False
@@ -260,3 +237,82 @@ def test_claude_check_returns_at_once_and_runs_later(wiz, fake_claude, monkeypat
     held[0][0](*held[0][1])
     assert "claude" in app.state.settings.get("setup.done_steps")
     assert "Claude works." in client.get(r.headers["location"]).text
+
+
+# ---------- Claude token step, setup bar (round 4, E3) ----------
+
+TOKEN = "tok-abcdefgh-wxyz"
+
+
+def stored_raw(app, key="claude.oauth_token_enc"):
+    return app.state.settings.get(key)
+
+
+def test_token_saved_encrypted_used_by_claude_env_never_shown(wiz, fake_claude, monkeypatch):
+    from app.llm.runner import claude_env
+
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    app, client = wiz
+    fake_claude.mode("ok")
+    r = post(client, "/setup/claude", {"oauth_token": TOKEN, "api_key": "sk-ant-key-1234"})
+    assert "Claude works." in r.text
+    raw = stored_raw(app)
+    assert raw and TOKEN not in raw and "sk-ant" not in stored_raw(app, "claude.api_key_enc")
+    env = claude_env(app.state.config, app.state.settings)
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == TOKEN and env["ANTHROPIC_API_KEY"] == "sk-ant-key-1234"
+    for page in ("/setup?step=claude", "/settings"):
+        html = client.get(page).text
+        assert TOKEN not in html and "sk-ant-key-1234" not in html and raw not in html
+        assert "ends with ...wxyz" in html
+    export = client.get("/settings/export.json").text
+    assert raw not in export and TOKEN not in export
+
+
+def test_env_token_wins_over_saved(wiz, monkeypatch):
+    from app import claude_auth
+    from app.llm.runner import claude_env
+
+    app, _ = wiz
+    claude_auth.save(app.state.settings, app.state.config, claude_auth.TOKEN_KEY, TOKEN)
+    from dataclasses import replace
+
+    cfg = replace(app.state.config, claude_code_oauth_token="env-token-wins")
+    assert claude_env(cfg, app.state.settings)["CLAUDE_CODE_OAUTH_TOKEN"] == "env-token-wins"
+
+
+def test_settings_replace_and_remove(wiz):
+    app, client = wiz
+    token = csrf_from(client.get("/settings").text)
+    client.post("/settings/claude", data={"csrf_token": token, "oauth_token": TOKEN})
+    assert stored_raw(app)
+    client.post("/settings/claude", data={"csrf_token": token, "remove": "token"})
+    assert stored_raw(app) == ""
+    assert "ends with" not in client.get("/settings").text
+
+
+def test_check_message_does_not_mention_env_file(wiz, fake_claude, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _, client = wiz
+    r = post(client, "/setup/claude")
+    assert "NO TOKEN" in r.text and ".env" not in r.text
+
+
+def test_setup_bar_shows_until_finished(wiz):
+    app, client = wiz
+    html = client.get("/").text
+    assert 'class="setup-bar"' in html and "Setup 0/" in html
+    app.state.settings.set("setup.finished", True)
+    assert 'class="setup-bar"' not in client.get("/").text
+
+
+def test_setup_claude_step_passes_saved_token_to_child(wiz, fake_claude, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _, client = wiz
+    fake_claude.mode("ok")
+    r = post(client, "/setup/claude", {"oauth_token": TOKEN})
+    assert "Claude works." in r.text
+    log = fake_claude.log()
+    assert log["has_oauth"] and TOKEN not in str(log)

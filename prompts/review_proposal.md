@@ -41,7 +41,7 @@ Check all seven, in this order:
   - Keep the freelancer's voice and facts. Change only what the review says is wrong. Do not rewrite a good draft just to make it different.
   - `answers` has one entry per screening question of the job, in order, using the question text as given. If the job has none, keep the freelancer's answers as they are (or an empty list).
   - Follow every instruction from the post. If it says to start with a word, the letter starts with that word.
-  - Plain punctuation only. No em dashes, no en dashes.
+  - Plain punctuation only. No em dashes, no en dashes. No bold, markdown, emoji, HTML, links, or web-address-shaped words (two words joined by a period with no space). Decimals like 2.5 are fine.
   - Never add a fact that is not in the user facts or in the draft. Do not add numbers. Use `[add a real proof here]` instead.
 
 ## Output

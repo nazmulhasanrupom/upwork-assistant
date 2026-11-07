@@ -18,6 +18,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.base_url import get_base_url
 from app.config import Config, load_config
 from app.gmail import Gmail, GmailError, build_message
 from app.settings import Settings
@@ -39,6 +40,10 @@ EVENTS = (
     "run_failed",
     "cannot_do",
     "digest",
+    "auto_send_waiting",
+    "auto_send_sent",
+    "auto_send_failed",
+    "auto_send_cancelled",
     "weekly",
     "monthly",
 )
@@ -312,6 +317,11 @@ def _record(conn: sqlite3.Connection, event: str, ref: str | None, now: datetime
     return SENT
 
 
+def _base(conn, config: Config) -> str:
+    """The panel address for email links: env, else the saved setting (tasks read the DB)."""
+    return get_base_url(Settings(conn), config)
+
+
 # ---------------------------------------------------------------- the emails daily.py sends
 
 
@@ -351,7 +361,7 @@ def notify_high_job(
         lines,
         facts=facts,
         link_path=f"/jobs/{job['id']}",
-        base_url=config.public_base_url,
+        base_url=_base(conn, config),
     )
     return send_event(
         conn, "high_job", str(job["id"]), f"New HIGH job: {title}", text, html, config=config, **kw
@@ -360,7 +370,7 @@ def notify_high_job(
 
 def notify_connects_low(conn, config: Config, message: str, day: str, **kw) -> str:
     text, html = build_email(
-        "Connects are low", [message], link_path="/", base_url=config.public_base_url
+        "Connects are low", [message], link_path="/", base_url=_base(conn, config)
     )
     return send_event(
         conn,
@@ -382,7 +392,7 @@ def notify_auth_expired(conn, config: Config, run_id: str, **kw) -> str:
             "Log in to Upwork again on the Upwork page.",
         ],
         link_path="/upwork",
-        base_url=config.public_base_url,
+        base_url=_base(conn, config),
         button_label="Open the Upwork page",
     )
     return send_event(
@@ -397,7 +407,7 @@ def notify_run_failed(
         f"The {task} run failed {failures} times in a row",
         ["The last error was:", error[:300]],
         link_path="/",
-        base_url=config.public_base_url,
+        base_url=_base(conn, config),
     )
     return send_event(
         conn,
@@ -434,7 +444,7 @@ def notify_invite(
         [line],
         items=[{"title": title, "meta": "Invitation to a job", "links": links}],
         link_path="/",
-        base_url=config.public_base_url,
+        base_url=_base(conn, config),
     )
     return send_event(
         conn, event, str(invite["id"]), f"{heading}: {title}"[:150], text, html, config=config, **kw
@@ -449,7 +459,7 @@ def notify_jss_drop(conn, config: Config, day: str, before: float, after: float,
             "The JSS guard is ON: profile tests are stopped until you clear it.",
         ],
         link_path="/",
-        base_url=config.public_base_url,
+        base_url=_base(conn, config),
     )
     return send_event(
         conn, "jss_drop", day, "Your Job Success Score dropped", text, html, config=config, **kw
@@ -467,7 +477,7 @@ def notify_rank_drop(
             f"It has been worse than the week before on {days} days in a row.",
         ],
         link_path="/",
-        base_url=config.public_base_url,
+        base_url=_base(conn, config),
     )
     return send_event(
         conn,
@@ -478,4 +488,31 @@ def notify_rank_drop(
         html,
         config=config,
         **kw,
+    )
+
+
+def notify_auto_send(
+    conn,
+    config: Config,
+    event: str,
+    auto_id: int,
+    job: dict[str, Any],
+    *,
+    heading: str,
+    lines: list[str],
+    facts: list[tuple[str, str]] | None = None,
+    **kw,
+) -> str:
+    """Round 3: the auto-send emails. `event` is auto_send_waiting, auto_send_sent,
+    auto_send_failed or auto_send_cancelled. One email per countdown and event."""
+    title = _clean(job.get("title") or job.get("job_id"))
+    text, html = build_email(
+        heading,
+        [title, *lines],
+        facts=facts,
+        link_path=f"/jobs/{job.get('job_id')}",
+        base_url=_base(conn, config),
+    )
+    return send_event(
+        conn, event, str(auto_id), f"{heading}: {title}"[:150], text, html, config=config, **kw
     )

@@ -1,0 +1,13 @@
+{# Claude login fields. Values are never shown back, only the last 4 characters. #}
+<label class="field"><span>Claude token (CLAUDE_CODE_OAUTH_TOKEN)</span>
+  <input type="password" name="oauth_token" autocomplete="off" spellcheck="false" placeholder="Paste the token here">
+  {% if claude_token_hint %}<span class="hint">{{ claude_token_hint }}. Leave empty to keep it.</span>{% endif %}
+</label>
+<details class="more">
+  <summary>Use an API key too</summary>
+  <label class="field"><span>API key (ANTHROPIC_API_KEY, optional)</span>
+    <input type="password" name="api_key" autocomplete="off" spellcheck="false" placeholder="Paste the key here">
+    {% if claude_key_hint %}<span class="hint">{{ claude_key_hint }}. Leave empty to keep it.</span>{% endif %}
+  </label>
+</details>
+{% if claude_from_env %}<p class="muted">A value set on the server wins over what you save here.</p>{% endif %}

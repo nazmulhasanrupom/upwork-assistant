@@ -1,9 +1,11 @@
 # Coolify / server deploy: no host port is published. Coolify's proxy (Traefik)
 # reaches the panel on the exposed container port 8000.
 # Laptop: docker compose -f docker-compose.yml -f docker-compose.local.yml up
+# Nothing here is required. Blank SECRET_KEY: the app makes its own and keeps it in /data.
+# Blank PUBLIC_BASE_URL: the app saves the address of the first page you open.
 x-app-env: &app-env
-  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
-  SECRET_KEY: ${SECRET_KEY}
+  PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+  SECRET_KEY: ${SECRET_KEY:-}
   CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   TZ: ${TZ:-UTC}
@@ -15,7 +17,7 @@ services:
   panel:
     build: .
     image: upwork-assistant:local
-    command: ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
     environment: *app-env
     expose:
       - "8000"

@@ -392,6 +392,6 @@ def test_static_urls_are_cache_busted(web):
     html = client.get("/chat").text
     assert re.search(r'/static/app\.css\?v=[0-9a-f]{10}"', html)
     assert re.search(r'/static/chat\.js\?v=[0-9a-f]{10}"', html)
-    assert re.search(r'/static/icons\.svg\?v=[0-9a-f]{10}#i-', html)
+    assert re.search(r"/static/icons\.svg\?v=[0-9a-f]{10}#i-", html)
     assert re.search(r'/static/htmx\.min\.js\?v=[0-9a-f]{10}"', html)
     assert client.get("/static/app.css?v=abc").status_code == 200

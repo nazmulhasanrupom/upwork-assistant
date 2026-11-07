@@ -11,10 +11,12 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
 
-from app import approvals, auth, playbook, skills, versioning
+from app import approvals, auth, auto_send, playbook, skills, versioning
 from app.approvals_routes import router as approvals_router
 from app.auth_routes import router as auth_router
+from app.base_url import get_base_url, remember_origin
 from app.chat_routes import router as chat_router
 from app.config import Config, load_config
 from app.context_routes import router as context_router
@@ -34,6 +36,7 @@ from app.review.routes import router as review_router
 from app.runs_routes import router as runs_router
 from app.settings import Settings
 from app.settings_routes import router as settings_router
+from app.setup_routes import progress
 from app.setup_routes import router as setup_router
 from app.trends_routes import router as trends_router
 from app.upwork.routes import router as upwork_router
@@ -81,10 +84,6 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.settings = Settings(app.state.db)
     app.state.worker = Worker(app.state.db, app.state.settings, config.db_path)
     app.state.worker.start()  # actions left from the last run become "stopped", never re-run
-    if not auth.admin_exists(app.state.db):
-        # Plain print: it must show even when LOG_LEVEL is high. Only the hash is stored.
-        code = auth.issue_setup_code(app.state.db, config.secret_key)
-        print(f"SETUP CODE: {code}", flush=True)
     try:
         versioning.ensure_repo(config, app.state.settings)
     except Exception:
@@ -129,7 +128,45 @@ def create_app(config: Config | None = None) -> FastAPI:
 
         return read
 
+    def auto_send_pill():
+        """Top bar pill while a countdown waits (the soonest). Never breaks a page."""
+        try:
+            cards = auto_send.waiting_cards(app.state.db)
+        except Exception:
+            logging.getLogger("auto_send").exception("Could not read the countdowns")
+            return None
+        if not cards:
+            return None
+        first = cards[0]
+        link = first["link"] if len(cards) == 1 else "/approvals"
+        return {**first, "link": link, "count": len(cards)}
+
     app.state.templates.env.globals["approvals_pending"] = approvals_pending
+    app.state.templates.env.globals["auto_send_pill"] = auto_send_pill
+
+    def totp_reminder() -> bool:
+        """Banner: turn on 2-step login. Never breaks a page."""
+        try:
+            return auth.totp_reminder_due(app.state.db, app.state.settings)
+        except Exception:
+            logging.getLogger("auth").exception("Could not check the 2-step reminder")
+            return False
+
+    app.state.templates.env.globals["totp_reminder"] = totp_reminder
+
+    @pass_context
+    def setup_progress(context):
+        """Top bar: done/total setup steps until setup is finished. Never breaks a page."""
+        try:
+            if app.state.settings.get("setup.finished"):
+                return None
+            req = context.get("request")
+            return progress(req) if req is not None else None
+        except Exception:
+            logging.getLogger("setup").exception("Could not read the setup progress")
+            return None
+
+    app.state.templates.env.globals["setup_progress"] = setup_progress
     app.state.templates.env.globals["nav_dry_run"] = _flag("general.dry_run")
     app.state.templates.env.globals["nav_kill_switch"] = _flag("general.kill_switch")
     app.state.templates.env.globals["actions_summary"] = _safe(
@@ -158,13 +195,23 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def session_cookie(request: Request, call_next):
+        path = request.url.path
+        if path != "/healthz" and not path.startswith("/static/"):
+            try:  # no PUBLIC_BASE_URL: keep the first real address the owner opened
+                remember_origin(app.state.settings, config, request)
+            except Exception:
+                logging.getLogger("base_url").exception("Could not save the panel address")
         response = await call_next(request)
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         session = getattr(request.state, "session", None)
         if session is not None and session.dirty:
-            flags = {"secure": True, "httponly": True, "samesite": "strict", "path": "/"}
+            # Secure only over https, so http://localhost or a LAN address can still log in.
+            https = request.url.scheme == "https" or get_base_url(
+                app.state.settings, config
+            ).lower().startswith("https://")
+            flags = {"secure": https, "httponly": True, "samesite": "strict", "path": "/"}
             if session.data:
                 hours = app.state.settings.get("security.session_hours")
                 response.set_cookie(

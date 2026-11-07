@@ -18,6 +18,7 @@
   <script src="{{ static_url('notice.js') }}" defer></script>
   <script src="{{ static_url('rows.js') }}" defer></script>
   <script src="{{ static_url('dock.js') }}" defer></script>
+  <script src="{{ static_url('autosend.js') }}" defer></script>
 </head>
 {% set growth = path.startswith(("/context", "/profile", "/playbook", "/trends", "/reports", "/learning")) %}
 {% set jobs_on = path.startswith(("/jobs", "/review")) %}
@@ -36,6 +37,8 @@
       </nav>
       <div class="topbar-right">
         <div id="actions-bar" class="actions-wrap">{% if actions_summary is defined %}{% include "_actions_bar.html" %}{% endif %}</div>
+        {% set asp = auto_send_pill() if auto_send_pill is defined else none %}
+        {% if asp %}<a class="pill warn auto-pill" href="{{ asp.link }}">Auto-send in <span class="auto-timer" data-deadline="{{ asp.deadline }}">{{ asp.timer }}</span>{% if asp.count > 1 %} ({{ asp.count }}){% endif %}</a>{% endif %}
         {% if nav_dry_run is defined and nav_dry_run() %}<a class="pill warn" href="/settings">Dry-run</a>{% endif %}
         {% if nav_kill_switch is defined and nav_kill_switch() %}<a class="pill bad" href="/settings">Stopped</a>{% endif %}
         <details class="gear">
@@ -57,6 +60,24 @@
       {% endif %}
     </div>
   </header>
+  {% set sp = setup_progress() if user and setup_progress is defined else none %}
+  {% if sp %}
+  <a class="setup-bar" href="/setup" aria-label="Setup {{ sp.done }} of {{ sp.total }}">
+    <span class="setup-bar-label">Setup {{ sp.done }}/{{ sp.total }}</span>
+    <span class="setup-bar-track"><span class="setup-bar-fill" style="width: {{ sp.percent }}%"></span></span>
+  </a>
+  {% endif %}
+  {% if user and totp_reminder is defined and totp_reminder() %}
+  <div class="reminder" role="status">
+    <span>Turn on 2-step login to keep your account safer.</span>
+    {{ button("Turn on", "primary", href="/settings#two-step", small=true) }}
+    <form method="post" action="/settings/two-step/skip" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="back" value="{{ path }}">
+      {{ button("Skip", "ghost", small=true) }}
+    </form>
+  </div>
+  {% endif %}
   {% set note = request.query_params.get("msg") if request else "" %}
   {% if note %}<div class="notice flash {{ 'error' if request.query_params.get('err') else 'ok' }}" data-notice role="{{ 'alert' if request.query_params.get('err') else 'status' }}"><span class="flash-text">{{ note[:300] }}</span></div>{% endif %}
   <main class="{% block main_class %}wide{% endblock %}">

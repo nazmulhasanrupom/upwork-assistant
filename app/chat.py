@@ -389,7 +389,7 @@ def call_claude(
         proc = live.run_process(
             cmd,
             cwd=run_dir,
-            env=runner.claude_env(config),
+            env=runner.claude_env(config, settings),
             timeout=int(_s(settings, "timeout_seconds")),
             conn=conn,
             data_dir=config.data_dir,

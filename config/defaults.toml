@@ -5,6 +5,7 @@
 dry_run = true            # SPEC 14: nothing is sent to Upwork while true
 kill_switch = false       # stops all tasks at once
 timezone = "UTC"
+public_base_url = ""      # the address of this panel; empty = saved from the first visit
 
 [setup]                   # SPEC 4.2: first-run wizard progress (written by /setup)
 done_steps = []                 # step keys the owner finished or skipped
@@ -195,6 +196,7 @@ monthly = ""
 profile_test = ""
 consolidate = ""
 research = ""
+auto_send = ""
 
 [models]                  # SPEC 4.4, 7.2
 think = "claude-opus-5-5"
@@ -218,6 +220,8 @@ retry_hours = 48                # jobs still waiting for a judgement or a draft 
 fetch_max_budget_usd = 0.25     # cap for one Upwork fetch run (plan P1)
 fetch_batch_size = 8            # Upwork tool calls per claude run
 fetch_timeout_seconds = 300
+oauth_token_enc = ""             # Claude login token, encrypted; set on the Claude setup step or in Settings
+api_key_enc = ""                # optional API key, encrypted
 config_dir = ""                 # CLAUDE_CONFIG_DIR for fetch runs; empty = $CLAUDE_CONFIG_DIR or <data dir>/claude
 
 [upwork]                  # SPEC 5. The mcp_* and oauth_* keys belong to the unused direct client (client.py, oauth.py)
@@ -304,6 +308,18 @@ batch_confirms = true           # the batch click also confirms each preview (st
 change_pct = 10.0               # judge: a 7-day average must move this many percent to count
 jss_drop_points = 3.0           # judge: a JSS drop of this many points is "hurt" at once
 
+[auto_send]               # round 3 A1: owner-approved auto-send after a countdown (see app/auto_send.py)
+enabled = true                  # a second switch; nothing is sent while general.dry_run is on
+min_fit = 90                    # judge fit score needed
+min_client_rating = 4.5         # client feedback score needed
+min_client_spend = 10000        # client total spent (USD) needed
+allowed_labels = ["GOOD", "POTENTIAL"]   # job activity labels that may auto-send
+keep_connects = 20              # Connects that must stay on the account after this proposal
+max_per_day = 3                 # most auto-sends started per UTC day
+wait_minutes = 120              # countdown before the app sends by itself
+check_minutes = 5               # how often the countdown task looks for due proposals
+max_highlights = 2              # portfolio / work history items added to an auto-sent proposal
+
 [safety]                  # plan HR1/X3: switches the agent may set but never clear
 jss_guard = false               # set when the JSS drops; stops Phase O profile tests. Only the owner clears it.
 jss_guard_note = ""             # why and when the guard was set
@@ -347,6 +363,10 @@ auth_expired = true
 run_failed = true
 cannot_do = true
 digest = true
+auto_send_waiting = true         # round 3: a countdown started (Approve or Stop in the panel)
+auto_send_sent = true            # the app sent a proposal
+auto_send_failed = true          # a send failed (never retried)
+auto_send_cancelled = true       # a countdown was cancelled by a safety check
 weekly = true
 monthly = true
 
@@ -366,6 +386,9 @@ max_login_tries = 5           # wrong tries before the login locks
 lockout_minutes = 15
 session_hours = 12
 password_min_length = 12
+totp_reminder_days = 7          # remind about 2-step login this many days after the account is made
+totp_reminder_again_days = 30   # after Skip, remind again after this many days (0 = never again)
+totp_reminder_skipped_at = ""   # set by the app when you press Skip
 
 [skills]                  # SPEC2 5.1 layer 3, plan L3 (skills in <DATA_DIR>/skills/<name>/SKILL.md)
 max_chars = 3000                # biggest SKILL.md the assistant may write

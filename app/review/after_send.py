@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app import mail
+from app.base_url import get_base_url
 from app.config import Config
 from app.llm.runner import BudgetCapReached, ClaudeRateLimited
 from app.pages import strip_untrusted
@@ -492,7 +493,7 @@ def notify_reviews(
     if not reviewed:
         return None
     try:
-        base = config.public_base_url.rstrip("/")
+        base = get_base_url(settings, config)
         items = []
         for r in reviewed:
             links = [("Open the review", f"{base}/review/{r['review_id']}")] if base else []
@@ -511,7 +512,7 @@ def notify_reviews(
             ["Claude reviewed the proposals below after you sent them. Nothing was changed."],
             items=items,
             link_path="/review",
-            base_url=config.public_base_url,
+            base_url=base,
             button_label="Open all reviews",
         )
         ref = ",".join(sorted(str(r["proposal_id"]) for r in reviewed))
