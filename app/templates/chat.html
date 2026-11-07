@@ -1,28 +1,28 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, icon, info, page_header %}
+{% from "_macros.html" import icon, info %}
 {% block title %}Chat{% endblock %}
 {% block main_class %}chat{% endblock %}
 {% block content %}
-<div class="chat-view">
-{% call page_header("Chat", "chat.intro") %}
+{% set empty = not messages and not pending_id %}
+<div class="chat-view{% if empty %} is-empty{% endif %}" id="chat-view">
+<header class="chat-head">
+  <h1>Chat{{ info("chat.intro") }}</h1>
   <form method="post" action="/chat/clear" class="inline" data-confirm="Start a new chat? This deletes the messages.">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {{ button("New chat", "ghost", small=true) }}
+    <button class="chat-new" type="submit">{{ icon("plus") }}New chat</button>
   </form>
-{% endcall %}
+</header>
+
+{% if empty %}
+<div class="chat-empty" id="chat-empty">
+  <h2>How can I help?</h2>
+  <p class="muted">Ask how things stand. I read your data and never change it.</p>
+</div>
+{% endif %}
 
 <section class="chat-log" id="chat-log" aria-label="Messages" aria-live="polite">
   {% for m in messages %}{% include "_chat_msg.html" %}{% endfor %}
   {% if pending_id %}{% set oob = false %}{% set action_id = pending_id %}{% include "_chat_pending.html" %}{% endif %}
-  {% if not messages and not pending_id %}
-  <div class="chat-empty" id="chat-empty">
-    <h2>How can I help?</h2>
-    <p class="muted">Ask how things stand. I read your data and never change it.</p>
-    <div class="chat-chips">
-      {% for s in suggestions %}<button type="button" class="chat-chip" data-suggest="{{ s }}">{{ s }}</button>{% endfor %}
-    </div>
-  </div>
-  {% endif %}
 </section>
 
 <div class="chat-dock">
@@ -37,7 +37,12 @@
     </div>
     <div class="chat-safe muted small"><span>Read-only. It can't change anything.</span> {{ info("chat.readonly") }}</div>
   </form>
+  {% if empty %}
+  <div class="chat-chips" id="chat-chips">
+    {% for s in suggestions %}<button type="button" class="chat-chip" data-suggest="{{ s }}">{{ s }}</button>{% endfor %}
+  </div>
+  {% endif %}
 </div>
 </div>
-<script src="/static/chat.js" defer></script>
+<script src="{{ static_url('chat.js') }}" defer></script>
 {% endblock %}

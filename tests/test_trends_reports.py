@@ -1,5 +1,6 @@
 """I3: /trends and /reports pages and the SVG charts. No JavaScript library, text is escaped."""
 
+import re
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -47,7 +48,8 @@ def test_trends_shows_skill_chart_and_median_lines(web):
     assert 'id="trends-fixed"' in html and 'class="line"' in html
     assert "<b>Evil</b>" not in html and "&lt;b&gt;Evil" in html
     assert 'id="trends-table"' in html and "$250" in html
-    assert "chart.js" not in html.lower() and "d3" not in html.split("<main")[0].lower()
+    head = re.sub(r"\?v=[0-9a-f]+", "", html.split("<main")[0]).lower()  # drop cache-bust hashes
+    assert "chart.js" not in html.lower() and "d3" not in head
 
 
 def test_nav_has_both_links(web):

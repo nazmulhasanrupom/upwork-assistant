@@ -92,5 +92,5 @@
   {{ empty("inbox", 'No chat room is stored yet. Click "Read messages from Upwork".') }}
   {% endif %}
 </section>
-<script src="/static/inbox.js" defer></script>
+<script src="{{ static_url('inbox.js') }}" defer></script>
 {% endblock %}

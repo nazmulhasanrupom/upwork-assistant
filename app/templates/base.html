@@ -11,13 +11,13 @@
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}Upwork Assistant{% endblock %} - Upwork Assistant</title>
   <link rel="preload" href="/static/fonts/Inter.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/htmx.min.js" defer></script>
-  <script src="/static/copy.js" defer></script>
-  <script src="/static/info.js" defer></script>
-  <script src="/static/notice.js" defer></script>
-  <script src="/static/rows.js" defer></script>
-  <script src="/static/dock.js" defer></script>
+  <link rel="stylesheet" href="{{ static_url('app.css') }}">
+  <script src="{{ static_url('htmx.min.js') }}" defer></script>
+  <script src="{{ static_url('copy.js') }}" defer></script>
+  <script src="{{ static_url('info.js') }}" defer></script>
+  <script src="{{ static_url('notice.js') }}" defer></script>
+  <script src="{{ static_url('rows.js') }}" defer></script>
+  <script src="{{ static_url('dock.js') }}" defer></script>
 </head>
 {% set growth = path.startswith(("/context", "/profile", "/playbook", "/trends", "/reports", "/learning")) %}
 {% set jobs_on = path.startswith(("/jobs", "/review")) %}

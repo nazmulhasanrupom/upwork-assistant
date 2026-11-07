@@ -61,8 +61,12 @@
 
   form.addEventListener("htmx:beforeRequest", function (e) {
     if (busy()) { e.preventDefault(); return; }
-    var empty = document.getElementById("chat-empty");
-    if (empty) { empty.remove(); }
+    ["chat-empty", "chat-chips"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { el.remove(); }
+    });
+    var view = document.getElementById("chat-view");
+    if (view) { view.classList.remove("is-empty"); }
     stick = true;
   });
   form.addEventListener("htmx:afterRequest", function (e) {

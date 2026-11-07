@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -40,6 +41,22 @@ from app.worker import Worker
 from app.worker_routes import router as worker_router
 
 APP_DIR = Path(__file__).parent
+
+
+def make_static_url(root: Path):
+    """static_url('app.css') -> '/static/app.css?v=<hash>' so browsers reload changed files."""
+    cache: dict[str, str] = {}
+
+    def static_url(path: str) -> str:
+        if path not in cache:
+            try:
+                digest = hashlib.sha256((root / path).read_bytes()).hexdigest()[:10]
+            except OSError:
+                digest = "0"
+            cache[path] = f"/static/{path}?v={digest}"
+        return cache[path]
+
+    return static_url
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -136,6 +153,7 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     app.state.templates.env.globals["claude_dock"] = claude_dock
     app.state.templates.env.globals["help_text"] = help_text
+    app.state.templates.env.globals["static_url"] = make_static_url(APP_DIR / "static")
     app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 
     @app.middleware("http")

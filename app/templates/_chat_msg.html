@@ -1,3 +1,4 @@
+{% from "_macros.html" import icon %}
 {# One saved chat message. Needs m (role, created, html). The html is already escaped. #}
 {% if m.role == "user" %}
 <article class="chat-msg chat-user" tabindex="0">
@@ -7,7 +8,7 @@
 </article>
 {% else %}
 <article class="chat-msg chat-ai" tabindex="0">
-  <span class="chat-avatar" aria-hidden="true">A</span>
+  <span class="chat-avatar" aria-hidden="true">{{ icon("sparkle") }}</span>
   <div class="chat-body">
     <span class="sr-only">Assistant</span>
     <div class="prose chat-text">{{ m.html }}</div>

@@ -56,7 +56,7 @@
 
 {# Lucide icon from /static/icons.svg (16px, stroke 1.75 in CSS). Decorative: hidden from screen readers. #}
 {% macro icon(name) -%}
-<svg class="icon" aria-hidden="true" focusable="false"><use href="/static/icons.svg#i-{{ name }}"></use></svg>
+<svg class="icon" aria-hidden="true" focusable="false"><use href="{{ static_url('icons.svg') }}#i-{{ name }}"></use></svg>
 {%- endmacro %}
 
 {# The "i" help icon. Text comes from app/help.toml. Hover and focus by CSS; tap and Esc by info.js. #}

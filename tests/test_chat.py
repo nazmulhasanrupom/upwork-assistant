@@ -383,3 +383,15 @@ def test_htmx_empty_and_busy_are_notes(web):
 def test_poll_needs_login(config, fake_claude_chat):
     _, client = make_web_client(config)
     assert client.get("/chat/poll/a1", follow_redirects=False).status_code in (302, 303, 401)
+
+
+def test_static_urls_are_cache_busted(web):
+    import re
+
+    _app, client, _fake = web
+    html = client.get("/chat").text
+    assert re.search(r'/static/app\.css\?v=[0-9a-f]{10}"', html)
+    assert re.search(r'/static/chat\.js\?v=[0-9a-f]{10}"', html)
+    assert re.search(r'/static/icons\.svg\?v=[0-9a-f]{10}#i-', html)
+    assert re.search(r'/static/htmx\.min\.js\?v=[0-9a-f]{10}"', html)
+    assert client.get("/static/app.css?v=abc").status_code == 200
