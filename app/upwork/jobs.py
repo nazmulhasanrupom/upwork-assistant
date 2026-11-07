@@ -34,6 +34,14 @@ P_JOB_ID = "job_id"
 MODE_RECENT = "most_recent"
 MODE_BEST = "best_match"
 
+# Upwork error text (lower case) -> error kind, for the job alert task. First match wins.
+KIND_RATE_LIMITED = "rate_limited"
+KIND_COOLDOWN = "cooldown"
+KIND_BUDGET = "budget"  # our own per-run call limit, not an Upwork error
+KIND_ERROR = "error"  # any other failed call
+COOLDOWN_PATTERNS = ("job_browse_cooldown",)
+RATE_LIMIT_PATTERNS = ("too many requests", "429", "rate limit", "rate-limit", "rate_limit")
+
 # Possible keys for the job budget (shape not yet seen in a real sample). First hit wins.
 HOURLY_MIN_KEYS = ("hourly_budget_min", "hourly_rate_min", "hourlyBudgetMin")
 HOURLY_MAX_KEYS = ("hourly_budget_max", "hourly_rate_max", "hourlyBudgetMax")
@@ -448,6 +456,23 @@ def _search_jobs(res: ToolResult, action: str) -> list[dict[str, Any]]:
     return [j for j in jobs if isinstance(j, dict)] if isinstance(jobs, list) else []
 
 
+def tool_error_kind(text: Any) -> str | None:
+    """ "cooldown" or "rate_limited" if Upwork error text says so, else None."""
+    low = str(text or "").lower()
+    if any(p in low for p in COOLDOWN_PATTERNS):
+        return KIND_COOLDOWN
+    if any(p in low for p in RATE_LIMIT_PATTERNS):
+        return KIND_RATE_LIMITED
+    return None
+
+
+def error_kind_of(err: BaseException) -> str:
+    """Kind for an exception from a call: cooldown, rate_limited, budget or error."""
+    if isinstance(err, CallBudgetExceeded):
+        return KIND_BUDGET
+    return tool_error_kind(err) or KIND_ERROR
+
+
 def known_ids(conn: sqlite3.Connection, ids: list[str]) -> set[str]:
     found: set[str] = set()
     for i in range(0, len(ids), 500):
@@ -518,6 +543,73 @@ def fetch_candidates(
 
     seen = known_ids(conn, list(merged))
     return [cut_down(j, settings=settings) for jid, j in merged.items() if jid not in seen]
+
+
+def fetch_recent(
+    client: Any, settings: Settings, conn: sqlite3.Connection
+) -> tuple[list[dict[str, Any]], str | None]:
+    """One most-recent smart_search for the job alert task. Returns (new jobs, error kind).
+
+    Unlike fetch_candidates it does not swallow errors. The kind is "rate_limited" or
+    "cooldown" (Upwork said so), "budget" (our per-run call limit stopped the call) or
+    "error" (any other tool error or a non-ok status). On any error the job list is empty.
+    New jobs are cut down (search data only) and skip ids already in the jobs table.
+    """
+    org_uid = settings.get("upwork.talent_org_uid")
+    if not org_uid:
+        raise JobsError("upwork.talent_org_uid is not set")
+    params = {
+        P_MODE: MODE_RECENT,
+        P_DAYS: int(settings.get("job_alerts.days_posted")),
+        P_VERIFIED: bool(settings.get("search.verified_payment_only")),
+        P_LIMIT: int(settings.get("job_alerts.search_limit")),
+    }
+    res = client.call_many(
+        [(TOOL, {"action": ACTION_SMART, "org_uid": str(org_uid), "params": params})]
+    )[0]
+    try:
+        payload = res.unwrap()
+    except (UpworkToolError, CallBudgetExceeded) as e:
+        kind = error_kind_of(e)
+        log.warning("find_jobs %s failed (%s): %s", ACTION_SMART, kind, e)
+        return [], kind
+    if not isinstance(payload, dict):
+        return [], tool_error_kind(payload) or (KIND_ERROR if payload else None)
+    status = payload.get("status")
+    if status is not None and status != "ok":
+        kind = tool_error_kind(json.dumps(payload, default=str)) or KIND_ERROR
+        log.warning("find_jobs %s status %s (%s)", ACTION_SMART, status, kind)
+        return [], kind
+    merged: dict[str, dict[str, Any]] = {}
+    jobs = payload.get("jobs")
+    for job in [j for j in jobs if isinstance(j, dict)] if isinstance(jobs, list) else []:
+        jid = job.get("id")
+        if jid is not None:
+            merged.setdefault(str(jid), job)
+    seen = known_ids(conn, list(merged))
+    new = [cut_down(j, settings=settings) for jid, j in merged.items() if jid not in seen]
+    return new, None
+
+
+def fetch_details_until_stop(
+    client: Any, job_ids: list[str], org_uid: str | None = None
+) -> tuple[list[dict[str, Any] | Exception], str | None]:
+    """Detail reads one at a time, stopping after the first cooldown / rate limit / budget stop.
+
+    Returns (results, stop_kind). `results` has one entry per job tried, in order (a parsed
+    detail or the exception for that job), so it may be shorter than `job_ids`. `stop_kind`
+    is "cooldown", "rate_limited" or "budget" when that ended the loop, else None. Other
+    per-job errors are in `results` and do not stop the loop.
+    """
+    out: list[dict[str, Any] | Exception] = []
+    for jid in job_ids:
+        res = fetch_details(client, [jid], org_uid)[0]
+        out.append(res)
+        if isinstance(res, Exception):
+            kind = error_kind_of(res)
+            if kind in (KIND_COOLDOWN, KIND_RATE_LIMITED, KIND_BUDGET):
+                return out, kind
+    return out, None
 
 
 # ---------------------------------------------------------------- save

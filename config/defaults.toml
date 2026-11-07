@@ -208,6 +208,7 @@ profile_test = ""
 consolidate = ""
 research = ""
 auto_send = ""
+job_alerts = ""
 
 [models]                  # SPEC 4.4, 7.2
 think = "claude-opus-5-5"
@@ -274,6 +275,19 @@ jss_drop_points = 1             # a drop of at least this many points counts
 rank_drop_enabled = true        # email when a keyword's rank gets worse for several days in a row
 rank_drop_positions = 3         # the average place must be worse by at least this many places ...
 rank_drop_days = 3              # ... on this many days in a row (7-day average vs the 7 days before)
+
+[job_alerts]              # instant job alerts (app/tasks/job_alerts.py); separate from [alerts] above
+enabled = false                 # when on, the daily run skips the job search
+interval_minutes = 15           # how often the job check runs
+search_limit = 10               # jobs asked per search
+days_posted = 1                 # only jobs posted within this many days
+max_details_per_run = 3         # job detail reads per run
+max_calls_per_day = 400         # Upwork calls this task may use per day
+fit_min = 75                    # email only when the fit score is at least this
+email_tiers = ["HIGH"]          # email only for these tiers
+quiet_hours = ""                # no runs in this window, e.g. "22:00-07:00"; empty = never quiet
+backoff_runs = 2                # runs to skip after an Upwork error
+backoff_left = 0                # written by the app: runs still to skip
 
 [writes]                  # plan H1: the write path (app/upwork/writes.py). Preview and confirm need a user click.
 preview_max_age_minutes = 25    # a preview older than this must be made again (Upwork keeps it about 30, to be measured)
@@ -361,6 +375,7 @@ digest_max_jobs = 15            # jobs listed in the digest email, best fit firs
 
 [email.events]            # one switch per email (SPEC 11); all on by default
 high_job = true
+job_alert = true                # instant job alert (job_alerts.fit_min and email_tiers)
 keywords_ready = true           # the keyword pick waits on /approvals
 profile_change_ready = true     # a profile test change waits on /approvals
 after_send_review = true
@@ -405,7 +420,7 @@ totp_reminder_skipped_at = ""   # set by the app when you press Skip
 max_chars = 3000                # biggest SKILL.md the assistant may write
 name_max_chars = 40             # longest skill folder name
 summary_max_chars = 160         # a summary shown in prompts is cut to this
-task_map = ["review_proposal=review-proposal", "draft_profile_change=draft-profile-change", "check_keyword_rank=check-keyword-rank"]   # Claude task=skill: the full text of that skill is loaded for that task
+task_map = ["review_proposal=review-proposal", "draft_profile_change=draft-profile-change", "check_keyword_rank=check-keyword-rank", "write_proposal=write-proposal"]   # Claude task=skill: the full text of that skill is loaded for that task
 
 [consolidation]           # SPEC2 5.3, plan L4 (weekly "dreaming", Opus)
 enabled = true

@@ -461,7 +461,12 @@ def _process(
     org_uid = str(settings.get("upwork.talent_org_uid") or "")
     week = J.iso_week(now)
 
-    new_jobs = J.fetch_candidates(client, settings, conn)  # steps 2, 3
+    if settings.get("job_alerts.enabled"):
+        # Instant alerts do the searching. Only older pending jobs are retried below.
+        new_jobs = []
+        oddities.append("job search skipped: instant alerts are on")
+    else:
+        new_jobs = J.fetch_candidates(client, settings, conn)  # steps 2, 3
     result.seen = len(new_jobs)
 
     survivors: list[dict[str, Any]] = []

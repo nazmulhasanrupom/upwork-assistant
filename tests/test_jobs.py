@@ -234,3 +234,91 @@ def test_iso_week():
     assert J.iso_week(date(2026, 11, 6)) == "2026-W45"
     assert J.iso_week(date(2027, 1, 1)) == "2026-W53"
     assert J.iso_week().startswith("20")
+
+
+# ---------------------------------------------------------------- job alerts (fetch_recent)
+
+KNOWN = "2118524057353559796"
+
+
+def test_tool_error_kind():
+    assert J.tool_error_kind("Too many requests, slow down") == "rate_limited"
+    assert J.tool_error_kind("HTTP 429") == "rate_limited"
+    assert J.tool_error_kind("Rate limit exceeded") == "rate_limited"
+    assert J.tool_error_kind("JOB_BROWSE_COOLDOWN: wait") == "cooldown"
+    assert J.tool_error_kind("something else") is None
+    assert J.tool_error_kind(None) is None
+
+
+def test_fetch_recent_success(conn, settings):
+    recent = load("smart_search_most_recent.json")
+    fake = FakeMCP(settings, search={"most_recent": recent})
+    jobs, err = J.fetch_recent(fake, settings, conn)
+    assert err is None
+    assert len(jobs) == len(recent["jobs"])
+    assert jobs[0]["id"] == KNOWN and jobs[0]["description"].startswith(J.OPEN_TAG)
+    assert len(fake.calls) == 1
+    _, args = fake.calls[0]
+    assert args["action"] == "smart_search" and args["org_uid"] == ORG
+    p = args["params"]
+    assert p["mode"] == "most_recent"
+    assert p["days_posted"] == int(settings.get("job_alerts.days_posted"))
+    assert p["limit"] == int(settings.get("job_alerts.search_limit"))
+    assert p["verified_payment_only"] == bool(settings.get("search.verified_payment_only"))
+
+
+def test_fetch_recent_skips_known_ids(conn, settings):
+    recent = load("smart_search_most_recent.json")
+    conn.execute(
+        "INSERT INTO jobs (job_id, first_seen, title) VALUES (?, '2026-01-01', 'x')", (KNOWN,)
+    )
+    jobs, err = J.fetch_recent(FakeMCP(settings, search={"most_recent": recent}), settings, conn)
+    assert err is None
+    assert KNOWN not in [j["id"] for j in jobs]
+    assert len(jobs) == len(recent["jobs"]) - 1
+
+
+def test_fetch_recent_rate_limited(conn, settings):
+    fake = FakeMCP(settings, search={"most_recent": UpworkToolError("429 Too Many Requests")})
+    assert J.fetch_recent(fake, settings, conn) == ([], "rate_limited")
+
+
+def test_fetch_recent_cooldown_status_and_budget(conn, settings):
+    bad = {"status": "error", "message": "JOB_BROWSE_COOLDOWN"}
+    assert J.fetch_recent(FakeMCP(settings, search={"most_recent": bad}), settings, conn) == (
+        [],
+        "cooldown",
+    )
+    other = UpworkToolError("boom")
+    assert J.fetch_recent(FakeMCP(settings, search={"most_recent": other}), settings, conn) == (
+        [],
+        "error",
+    )
+    from app.upwork.client import CallBudgetExceeded
+
+    over = CallBudgetExceeded("limit")
+    assert J.fetch_recent(FakeMCP(settings, search={"most_recent": over}), settings, conn) == (
+        [],
+        "budget",
+    )
+
+
+def test_details_stop_on_cooldown(settings):
+    fake = FakeMCP(
+        settings,
+        details={
+            "a": load("get_job.json"),
+            "b": UpworkToolError("JOB_BROWSE_COOLDOWN"),
+            "c": load("get_job.json"),
+        },
+    )
+    out, kind = J.fetch_details_until_stop(fake, ["a", "b", "c"])
+    assert kind == "cooldown"
+    assert len(out) == 2 and isinstance(out[0], dict) and isinstance(out[1], UpworkToolError)
+    assert [a["params"]["job_id"] for _, a in fake.calls] == ["a", "b"]
+
+
+def test_details_other_error_does_not_stop(settings):
+    fake = FakeMCP(settings, details={"a": UpworkToolError("nope"), "b": load("get_job.json")})
+    out, kind = J.fetch_details_until_stop(fake, ["a", "b"])
+    assert kind is None and len(out) == 2 and isinstance(out[1], dict)

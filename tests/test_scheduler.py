@@ -51,6 +51,28 @@ def test_due_task_starts_once_per_slot(settings, config, started):
     assert started == ["daily", "daily"]
 
 
+def test_job_alerts_cron_uses_interval_setting(settings):
+    assert scheduler._cron(settings, "job_alerts") == "*/15 * * * *"
+    settings.set("job_alerts.interval_minutes", 10)
+    assert scheduler._cron(settings, "job_alerts") == "*/10 * * * *"
+    settings.set("job_alerts.interval_minutes", 0)  # never a zero step
+    assert scheduler._cron(settings, "job_alerts") == "*/1 * * * *"
+
+
+def test_job_alerts_starts_only_when_enabled(settings, config, started):
+    started.built = {"job_alerts"}
+    r = scheduler.tick(settings, config, at(10, 15))
+    assert started == [] and r.line() == "tick: nothing due"  # off by default
+    settings.set("job_alerts.enabled", True)
+    r = scheduler.tick(settings, config, at(10, 15))
+    assert started == ["job_alerts"] and r.started == ["job_alerts"]
+    assert settings.get("scheduler.last_due.job_alerts") == "2026-11-06T10:15:00+00:00"
+    scheduler.tick(settings, config, at(10, 20))  # same slot
+    assert started == ["job_alerts"]
+    scheduler.tick(settings, config, at(10, 30))  # next slot
+    assert started == ["job_alerts", "job_alerts"]
+
+
 def test_first_tick_after_grace_skips_and_marks(settings, config, started):
     # 10:40 is 40 minutes after the 10:00 slot: past the 30 minute grace, so skipped and marked.
     r = scheduler.tick(settings, config, at(10, 40))

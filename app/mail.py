@@ -27,6 +27,7 @@ log = logging.getLogger("mail")
 
 EVENTS = (
     "high_job",
+    "job_alert",
     "keywords_ready",
     "profile_change_ready",
     "after_send_review",
@@ -365,6 +366,58 @@ def notify_high_job(
     )
     return send_event(
         conn, "high_job", str(job["id"]), f"New HIGH job: {title}", text, html, config=config, **kw
+    )
+
+
+def _budget(job: dict[str, Any]) -> str:
+    if isinstance(job.get("fixed_budget"), (int, float)):
+        return f"{_money(job['fixed_budget'])} fixed"
+    lo, hi = job.get("budget_min"), job.get("budget_max")
+    if isinstance(lo, (int, float)) or isinstance(hi, (int, float)):
+        return f"{_rate(lo)} to {_rate(hi)}"
+    return "n/a"
+
+
+def _age(posted: Any, now: datetime | None = None) -> str:
+    try:
+        when = datetime.fromisoformat(str(posted).replace("Z", "+00:00"))
+    except ValueError:
+        return "n/a"
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    mins = max(0, int(((now or datetime.now(UTC)) - when).total_seconds() // 60))
+    return f"{mins} min ago" if mins < 120 else f"{mins // 60} h ago"
+
+
+def notify_job_alert(
+    conn, config: Config, job: dict[str, Any], judgement: dict[str, Any] | None = None, **kw
+) -> str:
+    """Instant alert for one fresh job. One email per job (ref_id = job id)."""
+    title = _clean(job.get("title") or job.get("id"))
+    rating, reviews = job.get("client_rating"), job.get("client_reviews")
+    client = f"{_money(job.get('client_spend'))} spent"
+    if isinstance(rating, (int, float)):
+        client += f", rating {rating:g}" + (f" ({reviews} reviews)" if reviews else "")
+    facts = []
+    lines = [title]
+    if judgement:
+        facts.append(("Fit score", f"{judgement.get('fit_score')} / 100"))
+        lines += [f"Why apply: {_clean(r)}" for r in judgement.get("why_apply") or []]
+    facts += [
+        ("Budget", _budget(job)),
+        ("Client", client),
+        ("Proposals", _clean(job.get("proposals_tier")) or "n/a"),
+        ("Posted", _age(job.get("posted_at"), kw.get("now"))),
+    ]
+    text, html = build_email(
+        "Apply now",
+        lines,
+        facts=facts,
+        link_path=f"/jobs/{job['id']}",
+        base_url=_base(conn, config),
+    )
+    return send_event(
+        conn, "job_alert", str(job["id"]), f"Apply now: {title}", text, html, config=config, **kw
     )
 
 

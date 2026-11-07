@@ -31,8 +31,9 @@ MANUAL_TASKS = (
 )  # started by a button (KW1, O3, L4, L5)
 # also started by the scheduler: profile_test when due (O3); consolidate, research weekly (L4, L5)
 SCHEDULED_MANUAL = ("profile_test", "consolidate", "research")
-# only the scheduler starts these (no button): the auto-send countdown check (round 3, A2)
-SCHEDULED_ONLY = ("auto_send",)
+# only the scheduler starts these (no button): the auto-send countdown check (round 3, A2) and
+# the instant job alerts check
+SCHEDULED_ONLY = ("auto_send", "job_alerts")
 PACKAGE = "app.tasks"  # tests point this at a fake package
 ROOT = Path(__file__).resolve().parent.parent.parent  # /app in the image
 

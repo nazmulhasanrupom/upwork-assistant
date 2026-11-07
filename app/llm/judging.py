@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from typing import Any
 
-from app import proposal_rules
+from app import proposal_rules, skills
 from app.config import Config, load_config
 from app.llm import prompting
 from app.llm.runner import BudgetCapReached, ClaudeFailed, ClaudeRateLimited, run_claude
@@ -176,8 +176,16 @@ class _Runner:
         self.run_id = run_id  # the runs row, so /runs can show the cost of this run
         self.failures = 0
 
-    def call(self, task: str, prompt_file: str, input_obj: dict[str, Any], kind: str) -> Any:
+    def call(
+        self,
+        task: str,
+        prompt_file: str,
+        input_obj: dict[str, Any],
+        kind: str,
+        skill_task: str = "",
+    ) -> Any:
         s = self.settings
+        extra = skills.task_extra(self.config, s, skill_task) if skill_task else ""
         model = s.get(f"models.{kind}")
         try:
             res = run_claude(
@@ -191,7 +199,7 @@ class _Runner:
                 conn=self.conn,
                 settings=s,
                 effort=s.get(f"models.{kind}_effort") or None,
-                prompt_text=prompting.build_prompt(prompt_file, config=self.config),
+                prompt_text=prompting.build_prompt(prompt_file, extra, config=self.config),
                 record_run_id=self.run_id,
             )
         except BudgetCapReached as e:
@@ -425,6 +433,7 @@ def _fix_rules(
             "problems": problems,
         },
         "write",
+        "write_proposal",
     )
     if not isinstance(out, dict):
         return fields, problems
@@ -472,6 +481,7 @@ def _write_step(runner: _Runner, rows: list[sqlite3.Row], run_id: str | None) ->
             WRITE_PROMPT,
             {"jobs": [job_input(r) for r in batch], "plans": plans},
             "write",
+            "write_proposal",
         )
         if out is None:
             continue

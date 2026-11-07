@@ -40,7 +40,7 @@
           <strong class="change-msg">{{ c.subject }}</strong>
           <span class="small change-count"><span class="plus">+{{ ns.add }}</span> <span class="minus">-{{ ns.rem }}</span></span>
         </summary>
-        <p class="muted small"><code>{{ c.short }}</code>{% if c.files %} · {{ c.files | join(", ") }}{% endif %}</p>
+        <p class="muted small"><code>{{ c.short }}</code>{% if c.files %} · {{ c.files[:2] | join(", ") }}{% if c.files | length > 2 %} and {{ c.files | length - 2 }} more{% endif %}{% endif %}</p>
         {% if c.diff %}<pre class="text">{{ c.diff }}{% if c.cut %}
 ... (cut){% endif %}</pre>{% endif %}
       </details>

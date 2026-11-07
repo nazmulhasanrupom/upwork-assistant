@@ -635,6 +635,7 @@ upwork-assistant/
       weekly.py
       monthly.py
       digest.py
+      job_alerts.py         instant job alerts, see docs/JOB_ALERTS_DRAFT.md ([job_alerts] settings)
     mail.py
     db.py
     migrations/

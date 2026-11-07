@@ -311,7 +311,20 @@ def runs_panel(request: Request) -> dict:
                 "since": busy.get(task, ""),
             }
         )
+    settings = request.app.state.settings
+    alerts_on = bool(settings.get("job_alerts.enabled"))
+    alert_calls = 0
+    if alerts_on:
+        from app.tasks import job_alerts  # lazy: it imports the whole daily pipeline
+
+        alert_calls = job_alerts.calls_today(
+            request.app.state.db, config, settings, datetime.now(UTC)
+        )
+    last_alert = data["last_runs"].get("job_alerts")
     return {
+        "alerts_on": alerts_on,
+        "alert_calls": alert_calls,
+        "last_alert_check": last_alert["started"] if last_alert else None,
         "rows": rows,
         "any_busy": bool(busy),
         "kill_switch": bool(request.app.state.settings.get("general.kill_switch")),

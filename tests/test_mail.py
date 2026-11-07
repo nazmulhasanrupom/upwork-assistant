@@ -394,3 +394,54 @@ def test_daily_mail_failure_does_not_break_the_run(
         res = daily.run_daily(conn, settings, config, make_client(settings, balance=50))
     assert res.status == "ok" and res.kept == 5
     assert conn.execute("SELECT 1 FROM alerts WHERE key = 'email_failed'").fetchone()
+
+
+def test_job_alert_email_content_and_one_per_job(conn, config, settings):
+    assert "job_alert" in mail.EVENTS
+    connect_gmail(config, settings, conn)
+    job = {
+        "id": "j1",
+        "title": "Build an API",
+        "fixed_budget": 500,
+        "client_spend": 12000,
+        "client_rating": 4.9,
+        "client_reviews": 12,
+        "proposals_tier": "Less than 5",
+        "posted_at": (NOW - timedelta(minutes=7)).isoformat(),
+    }
+    judgement = {"fit_score": 88, "why_apply": ["strong match"]}
+    with respx.mock:
+        route = respx.post(SEND_URL).mock(return_value=httpx.Response(200, json={}))
+        assert (
+            mail.notify_job_alert(conn, config, job, judgement, settings=settings, now=NOW)
+            == mail.SENT
+        )
+        assert (
+            mail.notify_job_alert(conn, config, job, judgement, settings=settings, now=NOW)
+            != mail.SENT
+        )
+        assert route.call_count == 1
+    raw = json.loads(route.calls.last.request.content)["raw"]
+    msg = email.message_from_bytes(
+        base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)), policy=policy.default
+    )
+    assert msg["Subject"] == "Apply now: Build an API"
+    body = msg.get_body(("plain",)).get_content()
+    for part in (
+        "88 / 100",
+        "strong match",
+        "$500 fixed",
+        "4.9",
+        "Less than 5",
+        "7 min ago",
+        "/jobs/j1",
+    ):
+        assert part in body, part
+    assert count(conn, "job_alert") == 1
+
+
+def test_job_alert_switch_off(conn, config, settings):
+    connect_gmail(config, settings, conn)
+    settings.set("email.events.job_alert", False)
+    assert send(conn, config, settings, event="job_alert", ref="j1") == mail.OFF
+    assert count(conn) == 0

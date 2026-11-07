@@ -100,6 +100,8 @@ def _cron(settings: Settings, name: str) -> str:
     `auto_send.check_minutes` (the tick itself only happens every 5 minutes)."""
     if name == "auto_send":
         return f"*/{max(1, int(settings.get('auto_send.check_minutes')))} * * * *"
+    if name == "job_alerts":
+        return f"*/{max(1, int(settings.get('job_alerts.interval_minutes')))} * * * *"
     return settings.get(f"schedules.{name}")
 
 
@@ -120,6 +122,8 @@ def tick(
     for name in trigger.TASKS + trigger.SCHEDULED_MANUAL + trigger.SCHEDULED_ONLY:
         if not trigger.is_built(name):
             continue
+        if name == "job_alerts" and not settings.get("job_alerts.enabled"):
+            continue  # off: nothing to start (the task checks this too)
         expr = _cron(settings, name)
         slot = latest_slot(expr, now, zone)
         if slot is None:

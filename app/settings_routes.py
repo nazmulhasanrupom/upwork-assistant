@@ -46,6 +46,7 @@ READONLY_KEYS = {
     "safety.jss_guard_note",
     "email.gmail_address",
     "email.gmail_client_id",
+    "job_alerts.backoff_left",
 }
 # (min, max) for numbers with a real range. Others: 0 or more (any sign if the default is below 0).
 RANGES: dict[str, tuple[float, float]] = {

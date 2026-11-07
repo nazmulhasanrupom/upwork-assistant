@@ -4,6 +4,8 @@
 {% if kill_switch %}
 <p class="muted small" id="kill-note">The kill switch is on, so tasks cannot be started.</p>
 {% endif %}
+<p class="muted small" id="alert-status">Job alerts:
+{% if alerts_on %}last alert check {% if last_alert_check %}{{ last_alert_check | dt }}{% else %}never{% endif %}, {{ alert_calls }} Upwork call(s) today.{% else %}off.{% endif %}</p>
 <div class="table-wrap">
 <table class="table">
   <thead><tr><th scope="col">Task</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col" class="num">Upwork calls</th><th scope="col">Run</th></tr></thead>

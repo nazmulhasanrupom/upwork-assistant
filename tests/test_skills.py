@@ -14,7 +14,7 @@ from app.settings import Settings
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 
-BUNDLED = ("check-keyword-rank", "draft-profile-change", "review-proposal")
+BUNDLED = ("check-keyword-rank", "draft-profile-change", "review-proposal", "write-proposal")
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def test_user_edited_skill_is_not_overwritten(config, settings):
     path.parent.mkdir(parents=True)
     path.write_text("---\nname: review-proposal\nsummary: Mine.\n---\nmy own steps\n")
     copied = skills.ensure_skills(config, settings)
-    assert "review-proposal" not in copied and len(copied) == 2
+    assert "review-proposal" not in copied and len(copied) == 3
     assert "my own steps" in path.read_text()
 
 

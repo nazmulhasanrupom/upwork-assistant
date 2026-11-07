@@ -256,3 +256,24 @@ def test_fixtures_not_changed_by_run(conn, settings, config):
     before = copy.deepcopy(load("smart_search_best_match.json"))
     daily.run_daily(conn, settings, config, make_client(settings))
     assert load("smart_search_best_match.json") == before
+
+
+def test_job_alerts_on_skips_search(conn, settings, config, monkeypatch):
+    settings.set("job_alerts.enabled", True)
+    judged = []
+    monkeypatch.setattr(
+        daily, "judge_and_draft", lambda c, cands, **k: judged.append(cands) or JudgeResult()
+    )
+    client = make_client(settings)
+    res = daily.run_daily(conn, settings, config, client)
+    assert judged == [[]]
+    assert not [c for c in client.calls if c[0] == "find_jobs"]
+    assert res.seen == 0
+    text = next((config.data_dir / "memory" / "daily").glob("*.md")).read_text()
+    assert "job search skipped: instant alerts are on" in text
+
+
+def test_job_alerts_off_still_searches(conn, settings, config):
+    client = make_client(settings)
+    res = daily.run_daily(conn, settings, config, client)
+    assert res.seen > 0

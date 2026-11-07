@@ -267,3 +267,24 @@ def test_can_afford_is_computed_by_python(conn, settings, config, fake_claude_ge
         assert p["can_afford"] == (p["connects_cost"] <= 10)
         assert p["connects_balance"] == 10
     assert {p["can_afford"] for p in plans} == {True, False}
+
+
+def test_writer_prompt_holds_write_proposal_skill(
+    conn, settings, config, fake_claude_gen, user_md
+):
+    from app import skills
+
+    path = skills.skill_path(config, "write-proposal")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\nname: write-proposal\nsummary: Writing rules.\n---\nSKILLMARK open first.\n"
+    )
+    go(conn, settings, config)
+    assert "SKILLMARK" in calls(fake_claude_gen, "write")[0]["prompt"]
+    assert "SKILLMARK" not in calls(fake_claude_gen, "judge")[0]["prompt"]
+
+
+def test_writer_works_without_the_skill(conn, settings, config, fake_claude_gen, user_md):
+    go(conn, settings, config)
+    assert calls(fake_claude_gen, "write")
+    assert "SKILLMARK" not in calls(fake_claude_gen, "write")[0]["prompt"]

@@ -321,3 +321,11 @@ def test_dashboard_shows_user_md_alert(web):
         "'Add your profile facts (USER.md) to get drafts', '2026-11-06T00:00:00+00:00')"
     )
     assert "Add your profile facts (USER.md) to get drafts" in client.get("/").text
+
+
+def test_home_shows_job_alert_status(web):
+    app, client = web
+    assert "Job alerts: off" in re.sub(r"\s+", " ", client.get("/").text)
+    app.state.settings.set("job_alerts.enabled", True)
+    html = re.sub(r"\s+", " ", client.get("/").text)
+    assert "last alert check never, 0 Upwork call(s) today" in html
