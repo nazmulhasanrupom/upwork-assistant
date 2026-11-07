@@ -169,8 +169,11 @@ keywords = ["n8n automation", "AI automation", "AI agent developer", "Make.com",
 [keywords]                # plan KW1 (SPEC2 4.C phase 0): find the 3 to 5 keywords to rank for. Run by hand, never scheduled.
 seeds = ["n8n automation", "AI automation", "AI agent developer", "Make.com", "Zapier", "RAG chatbot", "Python automation", "workflow automation"]   # start list; edit it in the settings table
 max_seeds = 12                  # at most this many seeds are measured
-max_mcp_calls = 60              # this task's own MCP call budget (counted apart from upwork.max_mcp_calls_per_run)
-jobs_limit = 5                  # jobs asked per find_jobs search (only the total_matching number is used)
+max_mcp_calls = 80              # this task's own MCP call budget (counted apart from upwork.max_mcp_calls_per_run)
+jobs_limit = 10                 # jobs asked per find_jobs page (Upwork max 10); demand = jobs posted in the last demand_days
+demand_days = 7                 # demand counts the matching jobs posted in this many days
+demand_pages = 2                # at most this many job pages per seed; more recent jobs than that = "at least"
+competition_probe_offsets = [100, 300]   # freelancer search offsets probed for a floor on competition (Upwork gives no total)
 rank_pages = 2                  # freelancer pages read per seed (also gives the total number of freelancers and my place)
 min_picks = 3                   # Claude must pick at least this many seeds, else no approval item is made
 max_picks = 5                   # Claude's list is cut to this many

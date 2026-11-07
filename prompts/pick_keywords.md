@@ -13,8 +13,8 @@ You are the thinking model of an Upwork assistant for one freelancer. You choose
 
 - `keywords`: a JSON string inside `<keyword_data>` tags. A list of the candidate keywords. Each item has:
   - `keyword`: the text.
-  - `demand`: how many open jobs match it (`null` = could not be read).
-  - `competition`: how many freelancers show up for it (`null` = could not be read).
+  - `demand`: how many matching jobs were posted in the last few days (`null` = could not be read). When `demand_is_minimum` is true, there are at least this many.
+  - `competition`: how many freelancers show up for it (`null` = could not be read). When `competition_is_minimum` is true, there are at least this many (a floor, not an exact count).
   - `my_rank`: the freelancer's place in the search (`null` = not found in the pages checked, see `rank_status`).
   - `rank_status`: `found`, `not_found` (not in the first `rank_pages_seen` freelancers), or `unknown` (could not be checked).
   - `rank_pages_seen`: how many freelancers were looked through.

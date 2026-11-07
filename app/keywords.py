@@ -31,13 +31,14 @@ import re
 import sqlite3
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from app import approvals, mail, metrics, rank
 from app.base_url import get_base_url
 from app.config import Config
+from app.filters import activity
 from app.llm import prompting
 from app.llm.runner import (
     BudgetCapReached,
@@ -140,13 +141,49 @@ def jobs_total(data: Any) -> int | None:
     return None
 
 
-def _jobs_call(org_uid: str, keyword: str, limit: int) -> tuple[str, dict[str, Any]]:
+def _jobs_call(
+    org_uid: str, keyword: str, limit: int, cursor: str | None = None
+) -> tuple[str, dict[str, Any]]:
+    params: dict[str, Any] = {jobs.P_TITLE: keyword, jobs.P_LIMIT: limit}
+    if cursor:
+        params["cursor"] = cursor
     return (
         jobs.TOOL,
+        {"action": jobs.ACTION_SEARCH, "org_uid": org_uid, "params": params},
+    )
+
+
+def recent_jobs(data: Any, now: datetime, days: float) -> tuple[int, str | None]:
+    """Jobs on one search page posted within `days` (no date counts as recent), and the cursor
+    of the next page when paging on can still find recent jobs. Upwork's search has no total
+    any more, so demand is this count. A title search comes newest first."""
+    rows = data.get("jobs") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError("the answer has no jobs list")
+    cutoff = now - timedelta(days=days)
+    count, older = 0, False
+    for job in rows:
+        when = activity.posted_datetime(job) if isinstance(job, dict) else None
+        if when is None or when >= cutoff:
+            count += 1
+        else:
+            older = True
+    info = data.get("pageInfo") if isinstance(data.get("pageInfo"), dict) else {}
+    cursor = info.get("endCursor") if info.get("hasNextPage") is True else None
+    if cursor is None and data.get("hasMore") is True:
+        cursor = data.get("next_cursor")
+    if older or not rows or not isinstance(cursor, str) or not cursor:
+        return count, None
+    return count, cursor
+
+
+def _people_probe(org_uid: str, keyword: str, offset: int) -> tuple[str, dict[str, Any]]:
+    return (
+        rank.TOOL,
         {
-            "action": jobs.ACTION_SEARCH,
+            "action": "search",
             "org_uid": org_uid,
-            "params": {jobs.P_TITLE: keyword, jobs.P_LIMIT: limit},
+            "params": {"query": keyword, "limit": 1, "offset": offset},
         },
     )
 
@@ -184,25 +221,46 @@ def gather(
             "my_organic_rank": None,
             "rank_status": "unknown",
             "rank_pages_seen": 0,
+            "demand_is_minimum": False,
+            "competition_is_minimum": False,
             "errors": [],
         }
         for k in seeds
     }
     budget = getattr(bridge, "call_budget", None)
     with budget("keywords.max_mcp_calls") if budget else nullcontext():
-        answers = bridge.call_many([_jobs_call(org_uid, k, limit) for k in seeds])
-        for keyword, answer in zip(seeds, answers, strict=True):
-            try:
-                total = jobs_total(answer.unwrap())
-            except UpworkAuthError:
-                raise
-            except Exception as e:  # one failed seed must not stop the others
-                rows[keyword]["errors"].append(f"jobs: {_short(e)}")
-                log.info("Demand search failed for %r: %s", keyword, e)
-                continue
-            rows[keyword]["demand"] = total
-            if total is None:
-                rows[keyword]["errors"].append("jobs: the answer has no total_matching")
+        days = float(settings.get("keywords.demand_days"))
+        pages = max(1, int(settings.get("keywords.demand_pages")))
+        cursors: dict[str, str | None] = {k: None for k in seeds}
+        counts: dict[str, int] = {}
+        for _page in range(pages):
+            active = list(cursors)
+            if not active:
+                break
+            answers = bridge.call_many([_jobs_call(org_uid, k, limit, cursors[k]) for k in active])
+            for keyword, answer in zip(active, answers, strict=True):
+                try:
+                    data = answer.unwrap()
+                    total = jobs_total(data)
+                    found, nxt = (
+                        (total, None) if total is not None else recent_jobs(data, now, days)
+                    )
+                except UpworkAuthError:
+                    raise
+                except Exception as e:  # one failed seed must not stop the others
+                    rows[keyword]["errors"].append(f"jobs: {_short(e)}")
+                    log.info("Demand search failed for %r: %s", keyword, e)
+                    counts.pop(keyword, None)
+                    del cursors[keyword]
+                    continue
+                counts[keyword] = counts.get(keyword, 0) + found
+                if nxt is None:
+                    del cursors[keyword]
+                else:
+                    cursors[keyword] = nxt
+        for keyword, count in counts.items():
+            rows[keyword]["demand"] = count
+            rows[keyword]["demand_is_minimum"] = keyword in cursors  # stopped at the page cap
 
         key_known = bool(rank_key(bridge, settings))
         result = rank.check_ranks(
@@ -228,10 +286,52 @@ def gather(
             row["rank_status"] = "found" if r["position"] is not None else "not_found"
         if r.get("total") is None:
             row["errors"].append("freelancers: the answer has no total")
-    for keyword, reason in result.failed.items():
-        if keyword in rows:
-            rows[keyword]["errors"].append(f"freelancers: {reason}")
+        for keyword, reason in result.failed.items():
+            if keyword in rows:
+                rows[keyword]["errors"].append(f"freelancers: {reason}")
+        _probe_competition(bridge, org_uid, settings, rows, set(result.failed))
     return [rows[k] for k in seeds]
+
+
+def _probe_competition(
+    bridge: Any,
+    org_uid: str,
+    settings: Settings,
+    rows: dict[str, dict[str, Any]],
+    failed: set[str],
+) -> None:
+    """Upwork's freelancer search has no total any more. For a seed without one, ask for one
+    row at a few deeper offsets: the deepest offset that still has a row gives a floor
+    ("at least N freelancers"). Without any probe row the floor is what the rank pages saw."""
+    pending = [
+        k
+        for k, r in rows.items()
+        if r["competition"] is None and k not in failed and r["rank_pages_seen"]
+    ]
+    floors = {k: rows[k]["rank_pages_seen"] for k in pending}
+    for offset in sorted(int(o) for o in settings.get("keywords.competition_probe_offsets")):
+        if not pending:
+            break
+        answers = bridge.call_many([_people_probe(org_uid, k, offset) for k in pending])
+        still = []
+        for keyword, answer in zip(pending, answers, strict=True):
+            try:
+                data = answer.unwrap()
+                people = data.get("freelancers") if isinstance(data, dict) else None
+            except UpworkAuthError:
+                raise
+            except Exception as e:  # keep the floor found so far
+                log.info("Competition probe failed for %r: %s", keyword, e)
+                continue
+            if isinstance(people, list) and people:
+                floors[keyword] = max(floors[keyword], offset + 1)
+                still.append(keyword)
+        pending = still
+    for keyword, floor in floors.items():
+        row = rows[keyword]
+        row["competition"] = floor
+        row["competition_is_minimum"] = True
+        row["errors"] = [e for e in row["errors"] if "the answer has no total" not in e]
 
 
 def rank_key(bridge: Any, settings: Settings) -> str | None:
@@ -268,6 +368,8 @@ def claude_input(rows: list[dict[str, Any]], settings: Settings) -> dict[str, An
         "my_rank",
         "rank_status",
         "rank_pages_seen",
+        "demand_is_minimum",
+        "competition_is_minimum",
     )
     return {
         "keywords": _wrap([{k: r[k] for k in fields} for r in rows]),
@@ -374,6 +476,8 @@ def create_item(
                 "my_rank": r["my_rank"],
                 "rank_status": r["rank_status"],
                 "rank_pages_seen": r["rank_pages_seen"],
+                "demand_is_minimum": r.get("demand_is_minimum", False),
+                "competition_is_minimum": r.get("competition_is_minimum", False),
             }
         )
     conn.execute(
@@ -432,8 +536,8 @@ def notify(
 ) -> str:
     """One email per approval item (deduped on the item id). Returns the mail.send_event result."""
 
-    def num(v: Any) -> str:
-        return "n/a" if v is None else str(v)
+    def num(v: Any, floor: Any = False) -> str:
+        return "n/a" if v is None else f"{v}+" if floor else str(v)
 
     items = []
     for p in picks:
@@ -448,7 +552,8 @@ def notify(
             {
                 "title": p["keyword"],
                 "meta": (
-                    f"{num(p['demand'])} jobs, {num(p['competition'])} freelancers, "
+                    f"{num(p['demand'], p.get('demand_is_minimum'))} recent jobs, "
+                    f"{num(p['competition'], p.get('competition_is_minimum'))} freelancers, "
                     f"your place: {rank_text}"
                 ),
                 "lines": [p["reason"]] if p["reason"] else [],
@@ -537,7 +642,13 @@ def run_keywords(
         rows = gather(bridge, conn, settings, now, tz=config.tz)
         result.rows = rows
         measured = usable(rows)
-        picks = pick(conn, config, settings, measured, run_id)
+        try:
+            picks = pick(conn, config, settings, measured, run_id)
+        except KeywordsError as e:
+            reasons = [err for r in rows for err in r["errors"]]
+            if len(measured) < len(rows) and reasons:
+                raise KeywordsError(f"{e} First problem: {reasons[0]}") from e
+            raise
         result.picks = picks
         result.item_id, shown = create_item(conn, settings, run_id, picks, measured, now)
         result.email = notify(conn, config, settings, result.item_id, shown, now)

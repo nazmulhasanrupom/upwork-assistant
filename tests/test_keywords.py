@@ -207,7 +207,7 @@ def test_a_failed_seed_is_handled(conn, settings):
     rows = {r["keyword"]: r for r in keywords.gather(b, conn, settings, NOW)}
     assert rows["beta"]["demand"] is None and "jobs:" in rows["beta"]["errors"][0]
     assert rows["beta"]["competition"] == 1  # its other number survived
-    assert rows["gamma"]["demand"] is None and "no total_matching" in rows["gamma"]["errors"][0]
+    assert rows["gamma"]["demand"] == 0 and not rows["gamma"]["errors"]  # no jobs = 0 recent
     assert rows["delta"]["competition"] is None and rows["delta"]["rank_status"] == "unknown"
     assert rows["delta"]["demand"] == 700
     assert rows["alpha"]["demand"] == 900 and not rows["alpha"]["errors"]
@@ -419,7 +419,7 @@ def test_run_creates_one_approval_item_and_one_email(
     assert settings.get("keywords.baseline_started") == ""
     # one email with the picks and a link to /approvals
     [(subject, text, html)] = smtp
-    assert "Keywords ready" in subject and "alpha" in text and "900 jobs" in text
+    assert "Keywords ready" in subject and "alpha" in text and "900 recent jobs" in text
     assert "https://test.example/approvals" in text and "/approvals" in html
 
 
@@ -740,3 +740,65 @@ def test_task_main_uses_the_task_lock(config, monkeypatch):
         import os
 
         os.close(fd)
+
+
+# ---------------------------------------------------------------- Upwork answers without totals
+
+
+def job(days_old, i=0):
+    when = (NOW - timedelta(days=days_old)).isoformat().replace("+00:00", "Z")
+    return {"id": str(i), "title": "t", "published_date": when}
+
+
+def test_demand_counts_recent_jobs_page_by_page(conn, settings):
+    settings.set("keywords.seeds", ["alpha", "beta", "gamma"])
+    full = {
+        "jobs": [job(1, i) for i in range(10)],
+        "pageInfo": {"hasNextPage": True, "endCursor": "1"},
+    }
+    b = FakeBridge(
+        jobs={
+            "alpha": full,  # every page recent: stops at the page cap, "at least"
+            "beta": {
+                "jobs": [job(1), job(2), job(30)],
+                "pageInfo": {"hasNextPage": True, "endCursor": "1"},
+            },
+            "gamma": {"jobs": [job(3)], "pageInfo": {"hasNextPage": False}},
+        },
+        people={k: fpage(person("~01x"), more=False) for k in ["alpha", "beta", "gamma"]},
+    )
+    rows = {r["keyword"]: r for r in keywords.gather(b, conn, settings, NOW)}
+    assert rows["alpha"]["demand"] == 20 and rows["alpha"]["demand_is_minimum"] is True
+    assert rows["beta"]["demand"] == 2 and rows["beta"]["demand_is_minimum"] is False
+    assert rows["gamma"]["demand"] == 1 and rows["gamma"]["demand_is_minimum"] is False
+    jobs_calls = [c for c in b.calls if c[0] == "find_jobs"]
+    assert len(jobs_calls) == 4  # alpha twice (cursor), beta and gamma once
+    assert [c[1]["params"].get("cursor") for c in jobs_calls].count("1") == 1
+
+
+def test_competition_floor_is_probed_without_a_total(conn, settings):
+    settings.set("keywords.seeds", ["alpha", "beta"])
+    settings.set("keywords.rank_pages", 1)
+
+    class Probe(FakeBridge):
+        def call_many(self, calls):
+            out = []
+            for name, args in calls:
+                if name == "find_freelancers" and args["params"]["limit"] == 1:
+                    deep = {"alpha": 300, "beta": 100}[args["params"]["query"]]
+                    rows = [person("~01p")] if args["params"]["offset"] <= deep else []
+                    self.batches.append(copy.deepcopy([(name, args)]))
+                    out.append(to_result(name, fpage(*rows, more=bool(rows))))
+                else:
+                    out.extend(super().call_many([(name, args)]))
+            return out
+
+    b = Probe(
+        jobs={"alpha": 5, "beta": 5},
+        people={k: fpage(person("~01x"), more=True) for k in ["alpha", "beta"]},
+    )
+    rows = {r["keyword"]: r for r in keywords.gather(b, conn, settings, NOW)}
+    assert rows["alpha"]["competition"] == 301 and rows["alpha"]["competition_is_minimum"] is True
+    assert rows["beta"]["competition"] == 101 and rows["beta"]["competition_is_minimum"] is True
+    assert not rows["alpha"]["errors"] and not rows["beta"]["errors"]
+    assert keywords.usable(list(rows.values()))
