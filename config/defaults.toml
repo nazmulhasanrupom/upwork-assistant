@@ -91,6 +91,10 @@ summary_jobs = 5                # best new jobs listed
 lookup_chars = 4000             # a lookup result is cut at this size
 log_tail_lines = 40             # lines of a run log a lookup returns
 search_results = 5              # hits a search lookup returns
+title_chars = 48                # a chat is titled with the start of its first question, cut here
+stream_word_ms = 32             # pause between streamed words in the browser
+stream_poll_seconds = 0.4       # how often the stream endpoint looks at the live log
+stream_max_seconds = 600        # the stream endpoint stops after this long (the page then polls)
 
 [ui]
 jobs_page_size = 50             # cards per page on /jobs

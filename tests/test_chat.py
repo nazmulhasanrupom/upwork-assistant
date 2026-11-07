@@ -1,6 +1,7 @@
 """The Chat page (plan C1): summary, lookups, no tools, config, cost cap, escaping, auth."""
 
 import json
+import re
 import sqlite3
 
 import pytest
@@ -40,9 +41,18 @@ def web(config, fake_claude_chat):
     return app, client, fake_claude_chat
 
 
-def ask(client, text, token=None):
-    token = token or csrf_from(client.get("/chat").text)
-    return client.post("/chat/send", data={"message": text, "csrf_token": token})
+def cid_from(html):
+    """The chat the page's box would send to (like the hidden field the browser sends)."""
+    return re.search(r'name="conversation_id" id="chat-cid" value="(\d*)"', html).group(1)
+
+
+def ask(client, text, token=None, cid=None):
+    page = client.get("/chat").text
+    token = token or csrf_from(page)
+    cid = cid_from(page) if cid is None else cid
+    return client.post(
+        "/chat/send", data={"message": text, "csrf_token": token, "conversation_id": cid}
+    )
 
 
 def messages(app):
@@ -232,14 +242,18 @@ def test_em_dash_removed_from_reply(web):
     assert "—" not in messages(app)[-1]["text"]
 
 
-def test_clear_chat(web):
+def test_delete_chat(web):
     app, client, fake = web
     fake.replies(["ok"])
     ask(client, "hi")
     assert messages(app)
+    conv = app.state.db.execute("SELECT id FROM chat_conversations").fetchone()["id"]
     token = csrf_from(client.get("/chat").text)
-    r = client.post("/chat/clear", data={"csrf_token": token})
+    assert client.post(f"/chat/{conv}/delete").status_code == 403
+    r = client.post(f"/chat/{conv}/delete", data={"csrf_token": token}, follow_redirects=False)
     assert r.status_code == 303 and messages(app) == []
+    assert app.state.db.execute("SELECT COUNT(*) FROM chat_conversations").fetchone()[0] == 0
+    assert client.post("/chat/999/delete", data={"csrf_token": token}).status_code == 404
 
 
 def test_history_is_sent_and_limited(web):
@@ -277,7 +291,6 @@ def test_send_needs_csrf(web):
     app, client, fake = web
     r = client.post("/chat/send", data={"message": "hi", "csrf_token": "wrong"})
     assert r.status_code == 403 and not fake.called() and messages(app) == []
-    assert client.post("/chat/clear").status_code == 403
     assert client.get("/chat/send").status_code == 405
 
 
@@ -326,30 +339,43 @@ def test_htmx_send_returns_partial_without_redirect(web):
     assert 'id="chat-stop"' in done.text and "hx-swap-oob" in done.text
 
 
-def test_poll_running_shows_thinking_live_tail_and_stop(web):
-    app, client, _ = web
-    db = app.state.db
-    db.execute(
-        "INSERT INTO actions(id, kind, label, status, created) "
-        "VALUES ('a1', 'chat', 'x', 'running', datetime('now'))"
-    )
-    live_id = "a" * 16
-    db.execute(
-        "INSERT INTO claude_live(id, pid, pgid, kind, label, action_id, started, status) "
-        "VALUES (?, 1, 1, 'claude', 'chat', 'a1', datetime('now'), 'running')",
-        (live_id,),
-    )
+def running_action(app, log_text, action_id="a1", live_id="a" * 16):
+    """A running chat action with one claude job and a live log, like the worker leaves it."""
     from app.llm import live
 
+    db = app.state.db
+    db.execute(
+        "INSERT INTO actions(id, kind, label, status, created, target) "
+        "VALUES (?, 'chat', 'x', 'running', datetime('now'), '0')",
+        (action_id,),
+    )
+    db.execute(
+        "INSERT INTO claude_live(id, pid, pgid, kind, label, action_id, started, status) "
+        "VALUES (?, 1, 1, 'claude', 'chat', ?, datetime('now'), 'running')",
+        (live_id, action_id),
+    )
     path = live.log_path(app.state.config.data_dir, live_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("reading <script>x</script>\n")
+    path.write_text(log_text)
+    return path
+
+
+HEAD = "# chat (m)\n# prompt:\nthe long prompt\nwith lines\n# live output:\n"
+
+
+def test_poll_running_shows_collapsed_thinking_and_stop(web):
+    app, client, _ = web
+    running_action(app, HEAD + "> tool: x <script>alert(1)</script>\n")
     r = client.get("/chat/poll/a1")
-    assert "chat-dots" in r.text and "hx-trigger" in r.text
-    assert "&lt;script&gt;" in r.text and "<script>x" not in r.text
-    assert f"/claude/{live_id}/cancel" in r.text and "csrf_token" in r.text
-    page = client.get("/chat").text
-    assert "chat-pending" in page and f"/claude/{live_id}/cancel" in page
+    assert 'class="chat-think is-live"' in r.text and "<details" in r.text
+    assert " open" not in r.text.split("<details")[1].split(">")[0]  # collapsed
+    assert "Thinking" in r.text and "hx-trigger" in r.text
+    assert "&lt;script&gt;" in r.text and "<script>alert" not in r.text
+    assert "the long prompt" not in r.text  # the prompt part of the log is not shown
+    assert "/chat/stream/a1" in r.text
+    assert f"/claude/{'a' * 16}/cancel" in r.text and "csrf_token" in r.text
+    page = client.get("/chat/new").text
+    assert "chat-pending" not in page  # the running answer belongs to chat 0, not this page
     assert page.count('id="chat-stop"') == 1
 
 
@@ -395,3 +421,261 @@ def test_static_urls_are_cache_busted(web):
     assert re.search(r"/static/icons\.svg\?v=[0-9a-f]{10}#i-", html)
     assert re.search(r'/static/htmx\.min\.js\?v=[0-9a-f]{10}"', html)
     assert client.get("/static/app.css?v=abc").status_code == 200
+
+
+# ---------------------------------------------------------------- C4: history, thinking, stream
+
+
+def events(text):
+    out = []
+    for block in text.split("\n\n"):
+        name, data = None, None
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                name = line[7:]
+            elif line.startswith("data: "):
+                data = json.loads(line[6:])
+        if name:
+            out.append((name, data))
+    return out
+
+
+def test_conversations_create_switch_and_titles(web):
+    app, client, fake = web
+    fake.replies(["a1", "a2", "a3"])
+    ask(client, "First  question\nabout runs")
+    ask(client, "second in the same chat")  # the page's box carries the newest chat id
+    ask(client, "A brand new chat", cid="")
+    convs = app.state.db.execute("SELECT * FROM chat_conversations ORDER BY id").fetchall()
+    assert [c["title"] for c in convs] == ["First question about runs", "A brand new chat"]
+    own = lambda cid: [  # noqa: E731
+        r["text"]
+        for r in app.state.db.execute(
+            "SELECT text FROM chat_messages WHERE conversation_id = ? ORDER BY id", (cid,)
+        )
+    ]
+    assert len(own(convs[0]["id"])) == 4 and len(own(convs[1]["id"])) == 2
+
+    def log_of(html):  # the messages only, not the chat list
+        return html.split('id="chat-log"')[1].split('class="chat-dock"')[0]
+
+    first = log_of(client.get(f"/chat/{convs[0]['id']}").text)
+    assert "second in the same chat" in first and "A brand new chat" not in first
+    newest = log_of(client.get("/chat").text)  # /chat opens the newest chat
+    assert "A brand new chat" in newest and "second in the same chat" not in newest
+    assert client.get("/chat/999").status_code == 404
+    empty = client.get("/chat/new").text
+    assert 'id="chat-empty"' in empty and 'id="chat-cid" value=""' in empty
+
+
+def test_title_is_cut_by_setting(web):
+    app, client, fake = web
+    app.state.settings.set("chat.title_chars", 10)
+    fake.replies(["ok"])
+    ask(client, "x" * 50, cid="")
+    title = app.state.db.execute("SELECT title FROM chat_conversations").fetchone()["title"]
+    assert title == "x" * 7 + "..."
+
+
+def test_history_sent_only_from_current_chat(web):
+    app, client, fake = web
+    fake.replies(["answer one", "answer two", "answer three"])
+    ask(client, "alpha question", cid="")
+    ask(client, "beta question", cid="")  # another chat
+    ask(client, "follow up")  # newest chat (beta)
+    prompt = json.loads(open(fake_log(fake)).read().splitlines()[-1])["argv"][1]
+    assert "Freelancer: beta question" in prompt and "Assistant: answer two" in prompt
+    assert "alpha question" not in prompt and "answer one" not in prompt
+
+
+def test_old_messages_move_into_one_chat(tmp_path):
+    import shutil
+
+    from app import db as dbm
+
+    old = tmp_path / "old"
+    old.mkdir()
+    for p in dbm.MIGRATIONS_DIR.glob("*.sql"):
+        if int(p.name.split("_")[0]) <= 29:
+            shutil.copy(p, old / p.name)
+    conn = dbm.connect(":memory:")
+    dbm.migrate(conn, old)
+    for role, text in (("user", "q"), ("assistant", "a")):
+        conn.execute(
+            "INSERT INTO chat_messages(role, text, created) VALUES (?, ?, '2026-11-01T10:00:00')",
+            (role, text),
+        )
+    assert dbm.migrate(conn) == [30]
+    convs = conn.execute("SELECT * FROM chat_conversations").fetchall()
+    assert [c["title"] for c in convs] == ["Earlier chat"]
+    rows = conn.execute("SELECT conversation_id, think_seconds FROM chat_messages").fetchall()
+    assert {r["conversation_id"] for r in rows} == {convs[0]["id"]} and len(rows) == 2
+    assert all(r["think_seconds"] is None for r in rows)  # no thinking row on old replies
+
+
+def test_empty_database_migrates_without_a_chat(tmp_path):
+    from app import db as dbm
+
+    conn = dbm.connect(":memory:")
+    dbm.migrate(conn)
+    assert conn.execute("SELECT COUNT(*) FROM chat_conversations").fetchone()[0] == 0
+
+
+def test_groups_today_yesterday_week_older():
+    import sqlite3
+    from datetime import UTC, datetime, timedelta
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE chat_conversations(id INTEGER PRIMARY KEY, title, created, updated)")
+    now = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
+    for i, days in enumerate((0, 1, 3, 9, 30), start=1):
+        when = (now - timedelta(days=days)).isoformat(timespec="seconds")
+        conn.execute("INSERT INTO chat_conversations VALUES (?, ?, ?, ?)", (i, f"t{i}", when, when))
+    groups = chat.group_conversations(conn, UTC, now)
+    assert [(g, [r["title"] for r in rows]) for g, rows in groups] == [
+        ("Today", ["t1"]),
+        ("Yesterday", ["t2"]),
+        ("Previous 7 days", ["t3"]),
+        ("Older", ["t4", "t5"]),
+    ]
+
+
+def test_sidebar_lists_chats_marks_active_and_has_safe_delete(web):
+    app, client, fake = web
+    fake.replies(["ok"])
+    ask(client, "<b>first</b> chat", cid="")
+    ask(client, "second chat", cid="")
+    page = client.get("/chat").text
+    assert "Today" in page and 'id="chat-search"' in page and 'href="/chat/new"' in page
+    assert "&lt;b&gt;first&lt;/b&gt; chat" in page and "<b>first</b>" not in page
+    ids = [r["id"] for r in app.state.db.execute("SELECT id FROM chat_conversations ORDER BY id")]
+    assert page.index("second chat") < page.index("first")  # newest first
+    active = page.split('class="chat-hitem is-active"')[1].split("</li>")[0]
+    assert f'href="/chat/{ids[1]}"' in active and "second chat" in active
+    assert f'action="/chat/{ids[0]}/delete"' in page and "data-confirm=" in page
+    assert page.count('name="csrf_token"') >= 4
+
+
+def test_htmx_first_question_pushes_url_and_updates_list(web):
+    app, client, fake = web
+    fake.replies(["hi"])
+    r = hx(client, "hello there")
+    cid = app.state.db.execute("SELECT id FROM chat_conversations").fetchone()["id"]
+    assert r.headers["HX-Push-Url"] == f"/chat/{cid}"
+    assert 'id="chat-hist"' in r.text and "hx-swap-oob" in r.text and "hello there" in r.text
+    assert f'id="chat-cid" value="{cid}"' in r.text
+
+
+def test_stream_needs_login(config, fake_claude_chat):
+    _, client = make_web_client(config)
+    r = client.get("/chat/stream/a1", follow_redirects=False)
+    assert r.status_code in (302, 303, 401)
+
+
+def test_stream_unknown_action_is_404(web):
+    _, client, _ = web
+    assert client.get("/chat/stream/nope").status_code == 404
+
+
+def test_stream_sends_steps_and_answer_text_then_ends(web):
+    app, client, _ = web
+    running_action(app, HEAD)
+    app.state.db.execute("UPDATE actions SET status = 'done' WHERE id = 'a1'")
+    # two calls: the first is a lookup request, the second is the answer
+    app.state.db.execute(
+        "UPDATE claude_live SET started = '2026-01-01T00:00:00' WHERE id = ?", ("a" * 16,)
+    )
+    from app.llm import live
+
+    live2 = "b" * 16
+    app.state.db.execute(
+        "INSERT INTO claude_live(id, pid, pgid, kind, label, action_id, started, status) "
+        "VALUES (?, 1, 1, 'claude', 'chat', 'a1', '2026-01-01T00:00:05', 'done')",
+        (live2,),
+    )
+    first = live.log_path(app.state.config.data_dir, "a" * 16)
+    first.write_text(HEAD + '{"lookup": "get_job", "args": {"id": "<b>77</b>"}}\n')
+    live.log_path(app.state.config.data_dir, live2).write_text(
+        HEAD + "Here is the **answer** <script>alert(1)</script>\nsecond line\n"
+    )
+    r = client.get("/chat/stream/a1")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    assert r.headers["cache-control"].startswith("no-cache")
+    ev = events(r.text)
+    names = [n for n, _ in ev]
+    assert names[-1] == "done" and names.count("done") == 1
+    think = [d["text"] for n, d in ev if n == "think"]
+    # the lookup request is a thinking step, not answer text
+    assert think == ["Read the summary of the app", "Looking up job <b>77</b>"]
+    answer = "".join(d["text"] for n, d in ev if n == "delta")
+    assert answer == "Here is the **answer** <script>alert(1)</script>\nsecond line"
+    assert "lookup" not in answer and "the long prompt" not in r.text
+
+
+def test_stream_follows_a_running_log_and_stops_at_the_limit(web):
+    app, client, _ = web
+    app.state.settings.set("chat.stream_max_seconds", 1)
+    app.state.settings.set("chat.stream_poll_seconds", 0.05)
+    running_action(app, HEAD + "Partial text\n")
+    r = client.get("/chat/stream/a1")
+    ev = events(r.text)
+    assert ("delta", {"text": "Partial text"}) in ev and ev[-1][0] == "done"
+
+
+def test_lookup_request_detection():
+    from app import chat as c
+
+    assert c.lookup_request('{"lookup": "search", "args": {"q": "x"}}') is not None
+    assert c.lookup_request("Plain {braces} text") is None
+    assert c.lookup_request("```python\nprint(1)\n```") is None
+    assert c.lookup_request('```json\n{"lookup": "get_job"') is not None  # cut request
+
+
+def test_thinking_is_stored_and_shown_collapsed(web):
+    app, client, fake = web
+    fake.replies(
+        [
+            json.dumps({"lookup": "get_job", "args": {"id": "<i>9</i>"}}),
+            json.dumps({"lookup": "search", "args": {"q": "daily"}}),
+            "Done thinking.",
+        ]
+    )
+    ask(client, "look into it")
+    row = app.state.db.execute(
+        "SELECT thinking, think_seconds FROM chat_messages WHERE role = 'assistant'"
+    ).fetchone()
+    assert row["thinking"].splitlines() == [
+        "Read the summary of the app",
+        "Looking up job <i>9</i>",
+        'Searching for "daily"',
+    ]
+    assert row["think_seconds"] >= 1
+    page = client.get("/chat").text
+    det = page.split('<details class="chat-think is-done"')[1].split("</details>")[0]
+    assert "Thought for " in det and "<summary>" in det
+    assert "Looking up job &lt;i&gt;9&lt;/i&gt;" in det and "<i>9</i>" not in page
+    assert not page.split('<details class="chat-think is-done"')[1].startswith(" open")
+    assert "Done thinking." in page
+
+
+def test_no_thinking_row_for_early_replies(web):
+    app, client, fake = web
+    app.state.settings.set("chat.daily_cost_cap_usd", 0.0)
+    ask(client, "hi")
+    row = app.state.db.execute("SELECT think_seconds FROM chat_messages WHERE role='assistant'")
+    assert row.fetchone()["think_seconds"] is None
+    assert "chat-think is-done" not in client.get("/chat").text
+
+
+def test_front_end_files_are_safe_and_calm():
+    import pathlib
+
+    root = pathlib.Path(chat.__file__).parent / "static"
+    js = (root / "chat.js").read_text()
+    css = (root / "app.css").read_text()
+    assert "innerHTML" not in js and "insertAdjacentHTML" not in js and "eval(" not in js
+    assert "textContent" in js and "EventSource" in js
+    assert "prefers-reduced-motion" in css and "chat-shimmer" in css
+    assert "http://" not in js and "https://" not in js  # no CDN
+    assert "(prefers-reduced-motion: reduce)" in js

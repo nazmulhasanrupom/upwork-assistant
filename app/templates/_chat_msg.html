@@ -1,5 +1,5 @@
 {% from "_macros.html" import icon %}
-{# One saved chat message. Needs m (role, created, html). The html is already escaped. #}
+{# One saved chat message. Needs m (role, created, html, seconds, steps). The html is already escaped. #}
 {% if m.role == "user" %}
 <article class="chat-msg chat-user" tabindex="0">
   <span class="sr-only">You</span>
@@ -11,6 +11,12 @@
   <span class="chat-avatar" aria-hidden="true">{{ icon("sparkle") }}</span>
   <div class="chat-body">
     <span class="sr-only">Assistant</span>
+    {% if m.seconds is not none %}
+    <details class="chat-think is-done">
+      <summary><span class="chat-think-label">Thought for {{ m.seconds }}s</span>{{ icon("chevron") }}</summary>
+      <ol class="chat-steps">{% for st in m.steps %}<li>{{ st }}</li>{% endfor %}</ol>
+    </details>
+    {% endif %}
     <div class="prose chat-text">{{ m.html }}</div>
     <div class="chat-time muted small">{{ m.created | dt }}</div>
   </div>

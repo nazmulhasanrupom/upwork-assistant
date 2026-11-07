@@ -1,3 +1,5 @@
-{# The reply to a send: the question and the answer in the making. #}
+{# The reply to a send: the question and the answer in the making, plus the updated chat list. #}
 {% include "_chat_msg.html" %}
 {% set oob = true %}{% include "_chat_pending.html" %}
+{% if side %}{% set side_oob = true %}{% include "_chat_side.html" %}{% endif %}
+{% if cid %}<input type="hidden" name="conversation_id" id="chat-cid" value="{{ cid }}" hx-swap-oob="true">{% endif %}

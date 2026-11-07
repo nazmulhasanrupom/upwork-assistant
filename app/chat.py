@@ -47,6 +47,7 @@ CAP_REPLY = "The daily chat budget is used up, so I cannot answer more today. Tr
 MONTH_REPLY = "The monthly Claude budget is used up, so I cannot answer now."
 RATE_REPLY = "Claude is busy or rate limited right now. Try again in a few minutes."
 FAIL_REPLY = "I could not get an answer from Claude. Try again, or look at the Runs page."
+READ_STEP = "Read the summary of the app"
 LOOKUP_LIMIT_REPLY = (
     "I looked things up but could not finish an answer. Ask again in a shorter way."
 )
@@ -459,10 +460,16 @@ def answer(
     config: Config,
     conn: sqlite3.Connection,
     settings: Settings,
+    trace: list[str] | None = None,
 ) -> tuple[str, float]:
-    """The reply text for one question, and what it cost. Never raises for Claude trouble."""
+    """The reply text for one question, and what it cost. Never raises for Claude trouble.
+
+    `trace` (when given) gets one short line per thinking step: the same lines the Chat page
+    shows live and keeps under the reply."""
     if chat_spend_today(conn, config, settings) >= float(_s(settings, "daily_cost_cap_usd")):
         return CAP_REPLY, 0.0
+    steps = trace if trace is not None else []
+    steps.append(READ_STEP)
     summary = build_summary(conn, settings, config)
     hist = history_text(history)
     max_lookups = int(_s(settings, "max_lookups_per_turn"))
@@ -490,6 +497,7 @@ def answer(
             if step >= max_lookups:
                 return LOOKUP_LIMIT_REPLY, total
             name, args = request
+            steps.append(describe_lookup(name, args))
             lookups.append((name, run_lookup(ro, name, args, config=config, settings=settings)))
         return LOOKUP_LIMIT_REPLY, total
     finally:
@@ -524,3 +532,126 @@ def render_reply(text: str) -> Markup:
 
 def render_user(text: str) -> Markup:
     return Markup("<p>" + "<br>".join(str(escape(x)) for x in (text or "").split("\n")) + "</p>")  # noqa: S704
+
+
+# ---------------------------------------------------------------- thinking steps
+
+
+def describe_lookup(name: str, args: dict[str, Any]) -> str:
+    """A plain line for one lookup request, e.g. "Looking up job 123". Escaped where shown."""
+    what = {"get_job": "job", "get_run": "run", "get_report": "report"}.get(name)
+    if what:
+        return f"Looking up {what} {clip(_lookup_id(args) or '?', 60)}"
+    if name == "search":
+        return f'Searching for "{clip(str(args.get("q") or args.get("query") or ""), 60)}"'
+    return "Running a lookup"
+
+
+def lookup_request(text: str) -> tuple[str, dict[str, Any]] | None:
+    """Like parse_lookup, but also for a cut or odd text that clearly is a lookup request."""
+    req = parse_lookup(text)
+    if req is not None:
+        return req
+    body = (text or "").lstrip()
+    if body.startswith(("{", "```")) and '"lookup"' in body:
+        return "?", {}
+    return None
+
+
+LIVE_MARK = "# live output:"
+
+
+def read_live_log(data_dir: Path, live_id: str) -> tuple[list[str], list[str]]:
+    """(text lines, tool lines) of one claude call, read from its live log (after the prompt)."""
+    if not live.valid_id(live_id):
+        return [], []
+    try:
+        raw = live.log_path(data_dir, live_id).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return [], []
+    if LIVE_MARK in raw:
+        raw = raw.split(LIVE_MARK, 1)[1]
+    elif raw.startswith("# "):
+        return [], []  # the head is still being written
+    text: list[str] = []
+    tools: list[str] = []
+    for line in raw.splitlines():
+        if line.startswith("> tool:"):
+            tools.append(clip(line[2:].strip(), 120))
+        elif line.startswith("< tool result") or line.startswith("[finished]"):
+            continue
+        elif line.strip():
+            text.append(line)
+    return text, tools
+
+
+def live_view(conn: sqlite3.Connection, data_dir: Path, action_id: str) -> tuple[list[str], str]:
+    """(thinking steps, answer text so far) of an answer in the making, from the live logs.
+
+    A call whose whole text is a lookup request is a thinking step. Any other text is the answer."""
+    steps: list[str] = [READ_STEP]
+    answer = ""
+    rows = conn.execute(
+        "SELECT id FROM claude_live WHERE action_id = ? ORDER BY started, rowid", (action_id,)
+    ).fetchall()
+    for row in rows:
+        text_lines, tools = read_live_log(data_dir, row["id"])
+        steps += tools
+        text = "\n".join(text_lines).strip()
+        if not text:
+            continue
+        req = lookup_request(text)
+        if req is None:
+            answer = text
+        else:
+            steps.append(describe_lookup(*req))
+            answer = ""
+    return steps, answer
+
+
+# ---------------------------------------------------------------- conversations
+
+
+def title_from(text: str, limit: int) -> str:
+    return clip(" ".join((text or "").split()), limit) or "New chat"
+
+
+def create_conversation(conn: sqlite3.Connection, first_message: str, limit: int) -> int:
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    cur = conn.execute(
+        "INSERT INTO chat_conversations(title, created, updated) VALUES (?, ?, ?)",
+        (title_from(first_message, limit), now, now),
+    )
+    return int(cur.lastrowid or 0)
+
+
+def get_conversation(conn: sqlite3.Connection, conv_id: int) -> sqlite3.Row | None:
+    return _one(conn, "SELECT * FROM chat_conversations WHERE id = ?", (conv_id,))
+
+
+def newest_conversation_id(conn: sqlite3.Connection) -> int:
+    row = _one(conn, "SELECT id FROM chat_conversations ORDER BY updated DESC, id DESC LIMIT 1")
+    return int(row["id"]) if row else 0
+
+
+GROUPS = ("Today", "Yesterday", "Previous 7 days", "Older")
+
+
+def group_conversations(
+    conn: sqlite3.Connection, tz: Any, now: datetime | None = None
+) -> list[tuple[str, list[sqlite3.Row]]]:
+    """Conversations newest first in the groups Today, Yesterday, Previous 7 days, Older."""
+    now = now or datetime.now(UTC)
+    today = now.astimezone(tz).date()
+    buckets: dict[str, list[sqlite3.Row]] = {g: [] for g in GROUPS}
+    for row in _rows(conn, "SELECT * FROM chat_conversations ORDER BY updated DESC, id DESC"):
+        try:
+            when = datetime.fromisoformat(row["updated"])
+        except ValueError:
+            when = now
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        age = (today - when.astimezone(tz).date()).days
+        label = GROUPS[0 if age <= 0 else 1 if age == 1 else 2 if age < 8 else 3]
+        buckets[label].append(row)
+    return [(g, buckets[g]) for g in GROUPS if buckets[g]]

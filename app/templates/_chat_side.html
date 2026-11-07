@@ -1,0 +1,25 @@
+{% from "_macros.html" import icon %}
+{# The chat list, grouped by day. Needs side (groups, active_id). side_oob swaps it in place. #}
+<nav class="chat-hist" id="chat-hist" aria-label="Chats"{% if side_oob %} hx-swap-oob="true"{% endif %}>
+{% for label, rows in side.groups %}
+  <section class="chat-hgroup">
+    <h3>{{ label }}</h3>
+    <ul>
+    {% for c in rows %}
+      <li class="chat-hitem{% if c.id == side.active_id %} is-active{% endif %}" data-title="{{ c.title | lower }}">
+        <a class="chat-hlink" href="/chat/{{ c.id }}" title="{{ c.title }}"{% if c.id == side.active_id %} aria-current="page"{% endif %}><span class="chat-htitle">{{ c.title }}</span></a>
+        <details class="chat-hmenu">
+          <summary aria-label="Options for {{ c.title }}">{{ icon("more") }}</summary>
+          <form method="post" action="/chat/{{ c.id }}/delete" class="inline" data-confirm="Delete this chat? This cannot be undone.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">{{ icon("trash") }}Delete</button>
+          </form>
+        </details>
+      </li>
+    {% endfor %}
+    </ul>
+  </section>
+{% endfor %}
+{% if not side.groups %}<p class="chat-hempty muted small">No chats yet. Your questions are saved here.</p>{% endif %}
+<p class="chat-hnone muted small" hidden>No chat matches.</p>
+</nav>

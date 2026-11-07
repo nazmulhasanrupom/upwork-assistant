@@ -4,13 +4,23 @@
 {% block main_class %}chat{% endblock %}
 {% block content %}
 {% set empty = not messages and not pending_id %}
+<div class="chat-shell" id="chat-shell" data-word-ms="{{ word_ms }}">
+<aside class="chat-side" id="chat-side" aria-label="Chat history">
+  <div class="chat-side-top">
+    <a class="chat-newbtn" href="/chat/new">{{ icon("plus") }}New chat</a>
+    <button type="button" class="chat-side-close" id="chat-side-close" aria-label="Close history">{{ icon("x") }}</button>
+  </div>
+  <label class="sr-only" for="chat-search">Search chats</label>
+  <input class="chat-search" id="chat-search" type="search" placeholder="Search chats" autocomplete="off">
+  {% include "_chat_side.html" %}
+</aside>
+<div class="chat-scrim" id="chat-scrim"></div>
+
 <div class="chat-view{% if empty %} is-empty{% endif %}" id="chat-view">
 <header class="chat-head">
+  <button type="button" class="chat-histbtn" id="chat-histbtn" aria-controls="chat-side" aria-expanded="false">{{ icon("history") }}History</button>
   <h1>Chat{{ info("chat.intro") }}</h1>
-  <form method="post" action="/chat/clear" class="inline" data-confirm="Start a new chat? This deletes the messages.">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button class="chat-new" type="submit">{{ icon("plus") }}New chat</button>
-  </form>
+  <a class="chat-new" href="/chat/new">{{ icon("plus") }}New chat</a>
 </header>
 
 {% if empty %}
@@ -29,6 +39,7 @@
   <button type="button" class="chat-jump" id="chat-jump" hidden>{{ icon("arrow-down") }}Jump to latest</button>
   <form method="post" action="/chat/send" class="chat-form" id="chat-form" hx-post="/chat/send" hx-target="#chat-log" hx-swap="beforeend">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="conversation_id" id="chat-cid" value="{{ conv_id or '' }}">
     <div class="chat-box">
       <label class="sr-only" for="chat-input">Your question</label>
       <textarea id="chat-input" name="message" rows="1" maxlength="{{ max_chars }}" placeholder="Ask about runs, jobs, reports or costs" required></textarea>
@@ -42,6 +53,7 @@
     {% for s in suggestions %}<button type="button" class="chat-chip" data-suggest="{{ s }}">{{ s }}</button>{% endfor %}
   </div>
   {% endif %}
+</div>
 </div>
 </div>
 <script src="{{ static_url('chat.js') }}" defer></script>

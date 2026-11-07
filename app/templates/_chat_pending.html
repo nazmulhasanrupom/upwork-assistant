@@ -1,12 +1,16 @@
 {% from "_macros.html" import icon %}
-{# An answer in the making: thinking dots, the live log if any, polls until done. #}
+{# An answer in the making: a collapsed "Thinking" row, the streamed text, polls until done. #}
+{# chat.js streams from data-stream and cancels these polls while the stream works. #}
 {% set poll = worker_poll() %}
-<article class="chat-msg chat-ai chat-pending" id="chat-pending" hx-get="/chat/poll/{{ action_id }}" hx-trigger="every {{ poll }}s" hx-swap="outerHTML" role="status">
+<article class="chat-msg chat-ai chat-pending" id="chat-pending" aria-live="off" aria-busy="true" hx-get="/chat/poll/{{ action_id }}" hx-trigger="every {{ poll }}s" hx-swap="outerHTML" data-stream="/chat/stream/{{ action_id }}" data-poll="/chat/poll/{{ action_id }}" data-since="{{ since or 0 }}" data-word-ms="{{ word_ms }}">
   <span class="chat-avatar" aria-hidden="true">{{ icon("sparkle") }}</span>
   <div class="chat-body">
     <span class="sr-only">Assistant is thinking</span>
-    <div class="chat-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-    {% if live_text %}<pre class="chat-live">{{ live_text }}</pre>{% endif %}
+    <details class="chat-think is-live">
+      <summary><span class="chat-think-label">Thinking</span><span class="chat-think-time">{{ since or 0 }}s</span>{{ icon("chevron") }}</summary>
+      <ol class="chat-steps">{% for st in steps %}<li>{{ st }}</li>{% endfor %}</ol>
+    </details>
+    <div class="prose chat-text chat-stream" aria-live="off" hidden></div>
   </div>
 </article>
 {% if oob %}{% include "_chat_stop.html" %}{% endif %}

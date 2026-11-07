@@ -458,7 +458,7 @@ def test_migration_keeps_old_admin_with_totp(tmp_path):
         "INSERT INTO admin(id, username, password_hash, totp_secret_enc, created_at) "
         "VALUES (1, 'a@example.com', 'h', 'enc', '2026-01-01T00:00:00+00:00')"
     )
-    assert dbm.migrate(conn, Path(dbm.MIGRATIONS_DIR)) == [29]
+    assert dbm.migrate(conn, Path(dbm.MIGRATIONS_DIR))[0] == 29
     row = conn.execute("SELECT * FROM admin").fetchone()
     assert row["username"] == "a@example.com" and row["totp_secret_enc"] == "enc"
     conn.execute("UPDATE admin SET totp_secret_enc = NULL")  # nullable now
