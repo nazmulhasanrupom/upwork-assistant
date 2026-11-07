@@ -1,0 +1,17 @@
+{# One saved chat message. Needs m (role, created, html). The html is already escaped. #}
+{% if m.role == "user" %}
+<article class="chat-msg chat-user" tabindex="0">
+  <span class="sr-only">You</span>
+  <div class="chat-bubble">{{ m.html }}</div>
+  <div class="chat-time muted small">{{ m.created | dt }}</div>
+</article>
+{% else %}
+<article class="chat-msg chat-ai" tabindex="0">
+  <span class="chat-avatar" aria-hidden="true">A</span>
+  <div class="chat-body">
+    <span class="sr-only">Assistant</span>
+    <div class="prose chat-text">{{ m.html }}</div>
+    <div class="chat-time muted small">{{ m.created | dt }}</div>
+  </div>
+</article>
+{% endif %}

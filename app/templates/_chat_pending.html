@@ -1,0 +1,11 @@
+{# An answer in the making: thinking dots, the live log if any, polls until done. #}
+{% set poll = worker_poll() %}
+<article class="chat-msg chat-ai chat-pending" id="chat-pending" hx-get="/chat/poll/{{ action_id }}" hx-trigger="every {{ poll }}s" hx-swap="outerHTML" role="status">
+  <span class="chat-avatar" aria-hidden="true">A</span>
+  <div class="chat-body">
+    <span class="sr-only">Assistant is thinking</span>
+    <div class="chat-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+    {% if live_text %}<pre class="chat-live">{{ live_text }}</pre>{% endif %}
+  </div>
+</article>
+{% if oob %}{% include "_chat_stop.html" %}{% endif %}

@@ -1,0 +1,3 @@
+{# The Stop button slot. live_id is the running claude job of this answer ('' for none). #}
+{% from "_macros.html" import icon %}
+<div class="chat-stop" id="chat-stop"{% if oob %} hx-swap-oob="true"{% endif %}>{% if live_id %}<form method="post" action="/claude/{{ live_id }}/cancel" hx-post="/claude/{{ live_id }}/cancel" hx-swap="none"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="chat-stopbtn" type="submit" aria-label="Stop">{{ icon("square") }}</button></form>{% endif %}</div>

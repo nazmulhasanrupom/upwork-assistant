@@ -294,3 +294,92 @@ def test_settings_has_chat_section(web):
     app, client, _ = web
     assert client.get("/settings?section=chat").status_code == 200
     assert Settings(app.state.db).get("chat.effort") == "low"
+
+
+def hx(client, text):
+    token = csrf_from(client.get("/chat").text)
+    return client.post(
+        "/chat/send",
+        data={"message": text, "csrf_token": token},
+        headers={"HX-Request": "true"},
+    )
+
+
+def test_page_has_chips_stop_free_composer_and_safety_line(web):
+    _, client, _ = web
+    page = client.get("/chat").text
+    assert page.count("data-suggest=") == 4 and 'id="chat-empty"' in page
+    assert "Read-only. It can&#39;t change anything." in page or "Read-only. It can't" in page
+    assert 'hx-post="/chat/send"' in page and "/static/chat.js" in page
+    assert "chat-pending" not in page
+
+
+def test_htmx_send_returns_partial_without_redirect(web):
+    app, client, fake = web
+    fake.replies(["Hello **there**"])
+    r = hx(client, "<b>hi</b>")
+    assert r.status_code == 200 and "<html" not in r.text
+    assert "&lt;b&gt;hi&lt;/b&gt;" in r.text and "chat-pending" in r.text
+    aid = r.text.split("/chat/poll/")[1].split('"')[0]
+    done = client.get(f"/chat/poll/{aid}", headers={"HX-Request": "true"})
+    assert "<strong>there</strong>" in done.text and "chat-pending" not in done.text
+    assert 'id="chat-stop"' in done.text and "hx-swap-oob" in done.text
+
+
+def test_poll_running_shows_thinking_live_tail_and_stop(web):
+    app, client, _ = web
+    db = app.state.db
+    db.execute(
+        "INSERT INTO actions(id, kind, label, status, created) "
+        "VALUES ('a1', 'chat', 'x', 'running', datetime('now'))"
+    )
+    live_id = "a" * 16
+    db.execute(
+        "INSERT INTO claude_live(id, pid, pgid, kind, label, action_id, started, status) "
+        "VALUES (?, 1, 1, 'claude', 'chat', 'a1', datetime('now'), 'running')",
+        (live_id,),
+    )
+    from app.llm import live
+
+    path = live.log_path(app.state.config.data_dir, live_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("reading <script>x</script>\n")
+    r = client.get("/chat/poll/a1")
+    assert "chat-dots" in r.text and "hx-trigger" in r.text
+    assert "&lt;script&gt;" in r.text and "<script>x" not in r.text
+    assert f"/claude/{live_id}/cancel" in r.text and "csrf_token" in r.text
+    page = client.get("/chat").text
+    assert "chat-pending" in page and f"/claude/{live_id}/cancel" in page
+    assert page.count('id="chat-stop"') == 1
+
+
+def test_poll_errors_are_inline_notes(web):
+    app, client, _ = web
+    db = app.state.db
+    for aid, status, err in (("f1", "failed", "Cost cap <b>"), ("s1", "stopped", None)):
+        db.execute(
+            "INSERT INTO actions(id, kind, label, status, created, error) "
+            "VALUES (?, 'chat', 'x', ?, datetime('now'), ?)",
+            (aid, status, err),
+        )
+    f = client.get("/chat/poll/f1").text
+    assert "chat-note err" in f and "&lt;b&gt;" in f
+    assert "Stopped" in client.get("/chat/poll/s1").text
+    assert client.get("/chat/poll/nope").status_code == 404
+
+
+def test_htmx_empty_and_busy_are_notes(web):
+    app, client, _ = web
+    assert "Type a question first." in hx(client, "  ").text
+    app.state.db.execute(
+        "INSERT INTO actions(id, kind, label, status, created) "
+        "VALUES ('b1', 'chat', 'x', 'running', datetime('now'))"
+    )
+    r = hx(client, "again")
+    assert "still being made" in r.text and "<html" not in r.text
+    assert messages(app) == []
+
+
+def test_poll_needs_login(config, fake_claude_chat):
+    _, client = make_web_client(config)
+    assert client.get("/chat/poll/a1", follow_redirects=False).status_code in (302, 303, 401)

@@ -1,0 +1,3 @@
+{# The answer (or a note) when the action ended, plus an empty Stop slot. #}
+{% if m %}{% include "_chat_msg.html" %}{% else %}{% include "_chat_note.html" %}{% endif %}
+{% set live_id = "" %}{% set oob = true %}{% include "_chat_stop.html" %}
