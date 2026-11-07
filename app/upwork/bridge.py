@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import Config
+from app.llm import live
 from app.llm.runner import (
     ClaudeFailed,
     ClaudeRateLimited,
@@ -399,14 +400,18 @@ class ClaudeUpworkBridge:
         timeout = int(self.settings.get("claude.fetch_timeout_seconds"))
         log.info("claude fetch: %d call(s) run=%s", len(chunk), fetch_id)
         try:
-            proc = subprocess.run(
+            proc = live.run_process(
                 cmd,
                 cwd=run_dir,
                 env=env,
-                capture_output=True,
-                text=True,
                 timeout=timeout,
-                stdin=subprocess.DEVNULL,
+                conn=self.conn,
+                data_dir=self.config.data_dir,
+                settings=self.settings,
+                kind="read",
+                label=f"Read from Upwork ({len(chunk)} call(s))",
+                model=str(self.settings.get("models.fetch")),
+                run_id=self.run_id,
             )
         except FileNotFoundError as exc:
             raise ClaudeFailed("The `claude` command was not found on PATH.") from exc

@@ -8,18 +8,26 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
+from app.llm import live
 from app.llm.runner import looks_like_auth_error, looks_rate_limited
 
 TIMEOUT_SECONDS = 120
 CMD = ["claude", "-p", "say ok", "--output-format", "json", "--max-turns", "1"]
 
 
-def check(env: dict[str, str] | None = None) -> tuple[bool, str]:
-    """Returns (ok, message)."""
+def check(
+    env: dict[str, str] | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
+    data_dir: Path | None = None,
+) -> tuple[bool, str]:
+    """Returns (ok, message). With `conn` and `data_dir` the call shows in the Claude jobs dock."""
     env = dict(os.environ if env is None else env)
     if not env.get("CLAUDE_CODE_OAUTH_TOKEN") and not env.get("ANTHROPIC_API_KEY"):
         return False, (
@@ -28,14 +36,15 @@ def check(env: dict[str, str] | None = None) -> tuple[bool, str]:
         )
     try:
         with tempfile.TemporaryDirectory() as workdir:
-            proc = subprocess.run(
+            proc = live.run_process(
                 CMD,
                 cwd=workdir,
                 env=env,
-                capture_output=True,
-                text=True,
                 timeout=TIMEOUT_SECONDS,
-                stdin=subprocess.DEVNULL,
+                conn=conn,
+                data_dir=data_dir,
+                kind="check",
+                label="Check Claude",
             )
     except FileNotFoundError:
         return False, "CLAUDE NOT FOUND: the `claude` command is not installed or not on PATH."

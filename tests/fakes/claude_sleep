@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Fake `claude` that takes its time, for the live dock and Cancel tests (plan L1).
+
+It prints a stream-json log (init, one text, one tool call), then sleeps, then finishes.
+FAKE_SLEEP         seconds to sleep before it finishes (default 0)
+FAKE_PID_FILE      its pid is written there
+FAKE_CHILD_FILE    when set, it also starts a `sleep 60` child and writes the child pid there
+FAKE_IGNORE_TERM   1 = it ignores SIGTERM (only SIGKILL stops it)
+FAKE_EXIT          exit code (default 0)
+The text line echoes CLAUDE_CODE_OAUTH_TOKEN, so tests can check that the log hides it.
+"""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+
+
+def emit(obj):
+    print(json.dumps(obj), flush=True)
+
+
+if os.environ.get("FAKE_PID_FILE"):
+    with open(os.environ["FAKE_PID_FILE"], "w") as f:
+        f.write(str(os.getpid()))
+if os.environ.get("FAKE_IGNORE_TERM") == "1":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+if os.environ.get("FAKE_CHILD_FILE"):
+    child = subprocess.Popen(["sleep", "60"])
+    with open(os.environ["FAKE_CHILD_FILE"], "w") as f:
+        f.write(str(child.pid))
+
+emit({"type": "system", "subtype": "init", "session_id": "x"})
+emit({"type": "assistant", "message": {"role": "assistant", "content": [
+    {"type": "text", "text": "Reading the job <b>now</b>\nsecret is " + os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "none")}]}})
+emit({"type": "assistant", "message": {"role": "assistant", "content": [
+    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "input.json"}}]}})
+emit({"type": "user", "message": {"role": "user", "content": [
+    {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}})
+
+time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
+
+with open("output.json", "w") as f:
+    f.write('{"results": []}')
+emit({"type": "result", "subtype": "success", "is_error": False, "result": "DONE", "num_turns": 2,
+      "total_cost_usd": 0.01, "usage": {"input_tokens": 10, "output_tokens": 5}})
+sys.exit(int(os.environ.get("FAKE_EXIT", "0")))

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -12,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from app import approvals, auth, playbook, skills, versioning
 from app.approvals_routes import router as approvals_router
 from app.auth_routes import router as auth_router
+from app.chat_routes import router as chat_router
 from app.config import Config, load_config
 from app.context_routes import router as context_router
 from app.db import init_db
@@ -20,6 +23,8 @@ from app.help import help_text
 from app.inbox_routes import router as inbox_router
 from app.job_routes import router as job_router
 from app.learning_routes import router as learning_router
+from app.live_routes import router as live_router
+from app.llm import live
 from app.pages import install_filters
 from app.pages import router as pages_router
 from app.playbook_routes import router as playbook_router
@@ -31,6 +36,8 @@ from app.settings_routes import router as settings_router
 from app.setup_routes import router as setup_router
 from app.trends_routes import router as trends_router
 from app.upwork.routes import router as upwork_router
+from app.worker import Worker
+from app.worker_routes import router as worker_router
 
 APP_DIR = Path(__file__).parent
 
@@ -39,7 +46,13 @@ def create_app(config: Config | None = None) -> FastAPI:
     config = config or load_config()
     logging.basicConfig(level=config.log_level.upper())
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        yield
+        app.state.worker.stop()  # waits a little for running actions
+
     app = FastAPI(
+        lifespan=lifespan,
         title="Upwork Assistant",
         docs_url=None,
         redoc_url=None,
@@ -49,6 +62,8 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.config = config
     app.state.db = init_db(config.db_path)  # runs migrations on start
     app.state.settings = Settings(app.state.db)
+    app.state.worker = Worker(app.state.db, app.state.settings, config.db_path)
+    app.state.worker.start()  # actions left from the last run become "stopped", never re-run
     if not auth.admin_exists(app.state.db):
         # Plain print: it must show even when LOG_LEVEL is high. Only the hash is stored.
         code = auth.issue_setup_code(app.state.db, config.secret_key)
@@ -76,6 +91,18 @@ def create_app(config: Config | None = None) -> FastAPI:
             logging.getLogger("approvals").exception("Could not count pending approvals")
             return 0
 
+    def _safe(fn, fallback):
+        """A template helper that never breaks a page."""
+
+        def call(*args):
+            try:
+                return fn(*args)
+            except Exception:
+                logging.getLogger("worker").exception("Could not read the actions")
+                return fallback
+
+        return call
+
     def _flag(key: str):
         def read() -> bool:
             try:
@@ -88,6 +115,26 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.templates.env.globals["approvals_pending"] = approvals_pending
     app.state.templates.env.globals["nav_dry_run"] = _flag("general.dry_run")
     app.state.templates.env.globals["nav_kill_switch"] = _flag("general.kill_switch")
+    app.state.templates.env.globals["actions_summary"] = _safe(
+        lambda: app.state.worker.summary(), {"working": [], "recent": [], "count": 0, "poll": 2}
+    )
+    app.state.templates.env.globals["action_row"] = _safe(lambda i: app.state.worker.get(i), None)
+    app.state.templates.env.globals["worker_poll"] = _safe(
+        lambda: max(1, int(app.state.settings.get("worker.poll_seconds"))), 2
+    )
+
+    def claude_dock() -> dict:
+        """Running Claude jobs for the dock, and how often to ask again."""
+        st = app.state.settings
+        try:
+            jobs = live.running_rows(app.state.db, config.data_dir, st)
+        except Exception:
+            logging.getLogger("claude.live").exception("Could not read the Claude jobs")
+            jobs = []
+        key = "live.poll_seconds" if jobs else "live.idle_poll_seconds"
+        return {"jobs": jobs, "poll": max(1, int(st.get(key)))}
+
+    app.state.templates.env.globals["claude_dock"] = claude_dock
     app.state.templates.env.globals["help_text"] = help_text
     app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 
@@ -121,12 +168,15 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(runs_router)
     app.include_router(review_router)
     app.include_router(job_router)
+    app.include_router(chat_router)
     app.include_router(approvals_router)
     app.include_router(inbox_router)
     app.include_router(profile_router)
     app.include_router(playbook_router)
     app.include_router(learning_router)
     app.include_router(trends_router)
+    app.include_router(worker_router)
+    app.include_router(live_router)
     app.include_router(pages_router)
 
     @app.get("/healthz")

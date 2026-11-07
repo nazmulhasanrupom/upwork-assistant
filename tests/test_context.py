@@ -51,13 +51,18 @@ class FakeProfileMCP(CallManyMixin):
 def web(config):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     app.state.settings.set("upwork.talent_org_uid", ORG)
     return app, client
 
 
 def post(client, path, **data):
+    """Click. A queued action (Build) is followed to the page that shows its result."""
     token = csrf_from(client.get("/context").text)
-    return client.post(path, data={"csrf_token": token, **data})
+    r = client.post(path, data={"csrf_token": token, **data})
+    if r.status_code == 303 and r.headers["location"].startswith("/context?action="):
+        return client.get(r.headers["location"])
+    return r
 
 
 def user_file(config):
@@ -288,7 +293,7 @@ def test_build_profile_failure_shows_error_and_calls_no_claude(web, config, fake
     app, client = web
     use_bridge(app, FakeProfileMCP(profile=UpworkToolError("boom")))
     r = post(client, "/context/build")
-    assert r.status_code == 400 and "Could not read the Upwork profile" in r.text
+    assert "Could not read the Upwork profile" in r.text and "Failed" in r.text
     assert not fake_claude_gen.called() and not user_file(config).exists()
 
 
@@ -298,7 +303,7 @@ def test_build_login_problem_message(web, fake_claude_gen):
         app, FakeProfileMCP(profile=UpworkAuthError("Upwork login in Claude Code is missing"))
     )
     r = post(client, "/context/build")
-    assert r.status_code == 400 and "login in Claude Code is missing" in r.text
+    assert "login in Claude Code is missing" in r.text and "Failed" in r.text
     assert not fake_claude_gen.called()
 
 
@@ -307,7 +312,7 @@ def test_build_without_text_from_claude(web, fake_claude_gen):
     use_bridge(app, FakeProfileMCP())
     fake_claude_gen.env("FAKE_BUILD_EMPTY", "1")
     r = post(client, "/context/build")
-    assert r.status_code == 400 and "no USER.md text" in r.text
+    assert "no USER.md text" in r.text and "Failed" in r.text
 
 
 def test_build_stops_at_the_cap(web, fake_claude_gen):
@@ -315,7 +320,7 @@ def test_build_stops_at_the_cap(web, fake_claude_gen):
     use_bridge(app, FakeProfileMCP())
     app.state.settings.set("claude.monthly_cap_usd", 0.0)
     r = post(client, "/context/build")
-    assert r.status_code == 400 and "cap reached" in r.text.lower()
+    assert "cap reached" in r.text.lower() and "Failed" in r.text
     assert not fake_claude_gen.called()
 
 
@@ -372,3 +377,36 @@ def test_rebuild_uses_build_me_prompt_and_saving_goes_through_cap_and_history(
     r = post(client, "/context/use", proposed="NEW FACTS")
     assert r.status_code == 200 and user_file(config).read_text() == "NEW FACTS\n"
     assert commits == ["Update USER.md"]  # only the accepted save made a history entry
+
+
+# ---------- the worker (plan W3) ----------
+
+
+def test_build_returns_at_once_and_runs_later(web, config, fake_claude_gen):
+    app, client = web
+    use_bridge(app, FakeProfileMCP())
+    app.state.worker.sync = False
+    held = []
+
+    class Held:
+        def submit(self, fn, *args):
+            held.append((fn, args))
+
+    app.state.worker._pool = lambda: Held()
+    token = csrf_from(client.get("/context").text)
+    r = client.post("/context/build", data={"csrf_token": token})
+    assert r.status_code == 303 and "/context?action=" in r.headers["location"]
+    assert not fake_claude_gen.called()
+    assert "Waiting" in client.get(r.headers["location"]).text
+    r2 = client.post("/context/build", data={"csrf_token": token})
+    assert r2.headers["location"] == r.headers["location"] and len(held) == 1
+    held[0][0](*held[0][1])
+    assert "not saved until you click Use this" in client.get(r.headers["location"]).text
+
+
+def test_build_is_stopped_by_the_kill_switch(web, fake_claude_gen):
+    app, client = web
+    use_bridge(app, FakeProfileMCP())
+    app.state.settings.set("general.kill_switch", True)
+    r = post(client, "/context/build")
+    assert "Stopped by kill switch" in r.text and not fake_claude_gen.called()

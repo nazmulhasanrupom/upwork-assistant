@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, pill, page_header, jobs_tabs, info, empty %}
+{% from "_macros.html" import action_status, button, flash, card, pill, page_header, jobs_tabs, info, empty %}
 {% block title %}Review a proposal{% endblock %}
 {% block content %}
 {% call page_header("Review a proposal", "review.intro") %}{% endcall %}
 {{ jobs_tabs("/review") }}
+{% if action_id %}<div class="action-line" id="review-action">{{ action_status(action_id) }}</div>{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 
 <form method="get" action="/review" class="filters filter-bar" id="job-picker">

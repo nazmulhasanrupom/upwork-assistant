@@ -37,7 +37,7 @@ def test_trends_empty(web):
 
 def test_trends_shows_skill_chart_and_median_lines(web):
     app, client = web
-    today = datetime.now(UTC).date()
+    today = trends.today_in(app.state.settings, datetime.now(UTC))  # the page's own "today"
     for i, b in enumerate([100, 200, 300, 400]):
         add_job(app.state.db, f"t{i}", today, ["n8n", "<b>Evil</b>"], budget=b)
     for i, b in enumerate([100, 200, 300, 400]):

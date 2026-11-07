@@ -58,7 +58,7 @@ def test_success(config, conn, prompt, fake_claude):
     assert argv[0] == "-p" and "You are a test prompt." in argv[1]
     assert "--bare" not in argv
     assert argv[argv.index("--model") + 1] == "claude-opus-5-5"
-    assert argv[argv.index("--output-format") + 1] == "json"
+    assert argv[argv.index("--output-format") + 1] == "stream-json"
     assert "--strict-mcp-config" in argv
     assert argv[argv.index("--mcp-config") + 1].endswith("config/empty-mcp.json")
     assert argv[argv.index("--tools") + 1] == "Read,Write"

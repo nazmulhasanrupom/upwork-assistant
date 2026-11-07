@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import badge, pill, chips, button, card, flash, copy_button, info, icon %}
+{% from "_macros.html" import action_status, badge, pill, chips, button, card, flash, copy_button, info, icon %}
 {% block title %}{{ job.title or job.job_id }}{% endblock %}
 {# A write button in its own form. Why it is off goes in the "i" next to it (not a tooltip on a disabled button, which never gets hover). #}
 {% macro act_form(path, label, kind="primary", reason="", fid="") %}
@@ -43,10 +43,11 @@
         <div><dt>Rate paid</dt><dd>{{ (job.rate_paid | rate) or "n/a" }}</dd></div>
         <div><dt>Type</dt><dd>{{ job.job_type or "n/a" }}</dd></div>
         <div><dt>Proposals</dt><dd>{{ job.proposals_tier or "n/a" }}</dd></div>
+        <div><dt>Activity {{ info("jobs.activity") }}</dt><dd>{{ job.activity_label | act_name }}</dd></div>
         {% if details.experience_level %}<div><dt>Experience</dt><dd>{{ details.experience_level }}</dd></div>{% endif %}
         {% if details.duration %}<div><dt>Duration</dt><dd>{{ details.duration }}</dd></div>{% endif %}
         {% if details.skills %}<div><dt>Skills</dt><dd>{{ details.skills | join(", ") }}</dd></div>{% endif %}
-        <div><dt>Posted</dt><dd>{{ job.first_seen | dt }}</dd></div>
+        <div><dt>Posted</dt><dd>{{ (job.posted_at or job.first_seen) | dt }}</dd></div>
         <div><dt>Job ID</dt><dd><code class="wrap">{{ job.job_id }}</code></dd></div>
       </dl>
       {% endcall %}
@@ -103,6 +104,8 @@
     {% call card("Apply", help_key="job.apply") %}
     {% if act.dry_run %}{{ flash("info", "Dry-run is ON: Approve is logged and nothing is sent to Upwork.") }}{% endif %}
     {% if act.kill_switch %}{{ flash("error", "The kill switch is on. Prepare, answer, re-make and Approve are off. Editing and skipping still work.") }}{% elif act.blocked %}{{ flash("info", act.blocked) }}{% endif %}
+
+    {% if action_id %}<div class="action-line" id="job-action">{{ action_status(action_id) }}</div>{% endif %}
 
     <h3 class="sub sub-first">Draft{{ info("job.draft") }}</h3>
     {% if not draft %}

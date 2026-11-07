@@ -451,6 +451,7 @@ def fake_writer(monkeypatch):
 def web(config):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     s = app.state.settings
     s.set("upwork.talent_org_uid", ORG)
     s.set("rank.keywords", ["n8n automation"])
@@ -461,8 +462,13 @@ def web(config):
 
 
 def post(client, path, page="/approvals", **data):
+    """Click. A queued action is looked at once: a finished one answers with the redirect to its
+    result (as the click did before the worker); a failed one shows its message."""
     token = csrf_from(client.get(page).text)
-    return client.post(path, data={"csrf_token": token, **data}, follow_redirects=False)
+    r = client.post(path, data={"csrf_token": token, **data}, follow_redirects=False)
+    if r.status_code == 303 and "?action=" in r.headers["location"]:
+        return client.get(r.headers["location"], follow_redirects=False)
+    return r
 
 
 def add_item(conn, field="title", value="n8n and Make.com Expert", tactic_no=2, title="Test: x"):
@@ -548,7 +554,12 @@ def test_confirm_starts_the_experiment_with_baseline(web, fake_writer):
     app.state.settings.set("general.dry_run", False)
     conn.execute(
         "INSERT INTO metrics_daily(date, created_at, jss, proposals_sent) VALUES (?,?,?,?)",
-        (date.today().isoformat(), NOW.isoformat(), 98.0, 12),
+        (
+            playbook._today(app.state.settings, datetime.now(UTC)).isoformat(),
+            NOW.isoformat(),
+            98.0,
+            12,
+        ),
     )
     item = add_item(conn)
     post(client, f"/approvals/{item}/approve")
@@ -566,7 +577,7 @@ def test_confirm_starts_the_experiment_with_baseline(web, fake_writer):
     assert playbook.tactics(app.state.config)[1]["status"] == "testing"
     # the same preview cannot be confirmed twice
     r = post(client, f"/profile/previews/{p['id']}/confirm", page="/profile/versions")
-    assert r.status_code == 409 and count(conn, "experiments") == 1
+    assert "Failed" in r.text and count(conn, "experiments") == 1
 
 
 def test_confirm_failure_starts_no_test(web, fake_writer):
@@ -577,7 +588,7 @@ def test_confirm_failure_starts_no_test(web, fake_writer):
     post(client, f"/approvals/{item}/approve")
     [p] = previews(app.state.db)
     r = post(client, f"/profile/previews/{p['id']}/confirm", page="/profile/versions")
-    assert r.status_code == 502
+    assert "Failed" in r.text
     assert count(app.state.db, "experiments") == 0
 
 
@@ -586,7 +597,7 @@ def test_approve_is_blocked_while_a_test_runs(web, fake_writer):
     playbook.start_experiment(app.state.db, app.state.settings, app.state.config, "Other", 3)
     item = add_item(app.state.db)
     r = post(client, f"/approvals/{item}/approve")
-    assert r.status_code == 409 and "already running" in r.text
+    assert "Failed" in r.text and "already running" in r.text
     assert fake_writer.calls == [] and item_status(app.state.db, item) == "pending"
 
 
@@ -594,7 +605,7 @@ def test_jss_guard_blocks_approve(web, fake_writer):
     app, client = web
     app.state.settings.set("safety.jss_guard", True)
     item = add_item(app.state.db)
-    assert post(client, f"/approvals/{item}/approve").status_code == 409
+    assert "Failed" in post(client, f"/approvals/{item}/approve").text
     assert fake_writer.calls == []
 
 
@@ -618,7 +629,7 @@ def test_failed_preview_keeps_the_item_pending(web, monkeypatch):
     monkeypatch.setattr(writes, "ClaudeUpworkWriter", Failing)
     item = add_item(app.state.db)
     r = post(client, f"/approvals/{item}/approve")
-    assert r.status_code == 409 and "Upwork said no" in r.text
+    assert "Failed" in r.text and "Upwork said no" in r.text
     assert item_status(app.state.db, item) == "pending"
 
 
@@ -913,3 +924,81 @@ def test_apply_change_needs_the_web_context(conn, settings):
     with pytest.raises(approvals.ApprovalError, match="web page"):
         approvals.decide(conn, item, "approved")
     assert item_status(conn, item) == "pending"
+
+
+# ---------------------------------------------------------------- the worker (plan W3)
+
+
+class HeldPool:
+    """Stands in for the thread pool: keeps the work so the test can run it later."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def submit(self, fn, *args):
+        self.jobs.append((fn, args))
+
+    def run_all(self):
+        jobs, self.jobs = self.jobs, []
+        for fn, args in jobs:
+            fn(*args)
+
+
+def hold(app):
+    pool = HeldPool()
+    app.state.worker.sync = False
+    app.state.worker._pool = lambda: pool
+    return pool
+
+
+def test_confirm_returns_at_once_and_dry_run_is_read_again_when_it_runs(web, fake_writer):
+    app, client = web
+    conn = app.state.db
+    app.state.settings.set("general.dry_run", False)
+    item = add_item(conn)
+    post(client, f"/approvals/{item}/approve")
+    [p] = previews(conn)
+    pool = hold(app)
+    token = csrf_from(client.get("/profile/versions").text)
+    url = f"/profile/previews/{p['id']}/confirm"
+    r = client.post(url, data={"csrf_token": token})
+    assert r.status_code == 303 and "/profile/versions?action=" in r.headers["location"]
+    assert all(t != writes.CONFIRM_PREVIEW for t, _ in fake_writer.calls)  # not sent yet
+    again = client.post(url, data={"csrf_token": token})
+    assert again.headers["location"] == r.headers["location"] and len(pool.jobs) == 1
+    app.state.settings.set("general.dry_run", True)  # changed while the action waited
+    pool.run_all()
+    assert all(t != writes.CONFIRM_PREVIEW for t, _ in fake_writer.calls)
+    assert previews(conn)[0]["confirm_status"] == "dry_run_blocked"
+    done = client.get(r.headers["location"], follow_redirects=False)
+    assert done.status_code == 303 and "done=dry_run" in done.headers["location"]
+
+
+def test_confirm_is_stopped_by_the_kill_switch_when_it_runs(web, fake_writer):
+    app, client = web
+    app.state.settings.set("general.dry_run", False)
+    item = add_item(app.state.db)
+    post(client, f"/approvals/{item}/approve")
+    [p] = previews(app.state.db)
+    hold(app)
+    token = csrf_from(client.get("/profile/versions").text)
+    r = client.post(f"/profile/previews/{p['id']}/confirm", data={"csrf_token": token})
+    app.state.settings.set("general.kill_switch", True)
+    app.state.worker._pool().run_all()
+    assert "Stopped by kill switch" in client.get(r.headers["location"]).text
+    assert all(t != writes.CONFIRM_PREVIEW for t, _ in fake_writer.calls)
+    assert previews(app.state.db)[0]["confirmed_at"] is None
+
+
+def test_batch_runs_on_the_worker_and_stops_on_the_kill_switch(web, fake_writer):
+    app, client = web
+    item = add_item(app.state.db)
+    hold(app)
+    token = csrf_from(client.get("/approvals").text)
+    r = client.post("/approvals/small/approve", data={"csrf_token": token})
+    assert r.status_code == 303 and "/approvals?action=" in r.headers["location"]
+    assert fake_writer.calls == [] and item_status(app.state.db, item) == "pending"
+    app.state.settings.set("general.kill_switch", True)
+    app.state.worker._pool().run_all()
+    assert "Stopped by kill switch" in client.get(r.headers["location"]).text
+    assert fake_writer.calls == [] and item_status(app.state.db, item) == "pending"

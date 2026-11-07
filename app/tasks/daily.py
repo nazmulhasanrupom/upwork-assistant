@@ -25,10 +25,12 @@ from app import alerts, mail, memory, metrics, notes, profile_loop, rank
 from app import profile_versions as profile_versions_mod
 from app.config import Config, load_config
 from app.db import init_db
+from app.filters.activity import HIDE, classify
 from app.filters.flags import flags as red_flags
 from app.filters.tiers import prefilter, tier
 from app.llm import judging
 from app.llm.judging import JudgeResult
+from app.llm.live import ClaudeCancelled
 from app.llm.runner import BudgetCapReached, ClaudeRateLimited
 from app.review import after_send
 from app.settings import Settings
@@ -466,11 +468,14 @@ def _process(
     for job in new_jobs:  # step 4
         skills.update(set(job.get("skills") or []))
         J.save_skills(conn, job["id"], job.get("skills") or [], week)
+        label, rule = classify(job, settings, now)
         keep, reason = prefilter(job, settings)
+        if keep and label == HIDE:
+            keep, reason = False, f"activity: {rule}"
         if keep:
             survivors.append(job)
         else:
-            J.save_job(conn, job, status="dropped", drop_reason=reason)
+            J.save_job(conn, job, status="dropped", drop_reason=reason, activity_label=label)
             result.dropped += 1
 
     kept: list[dict[str, Any]] = []
@@ -500,9 +505,12 @@ def _process(
         full = J.apply_detail(job, detail, settings)
         if full.get("connects_balance") is not None:
             balance = full["connects_balance"]
+        label, rule = classify(full, settings, now)
         keep, reason = prefilter(full, settings)
+        if keep and label == HIDE:
+            keep, reason = False, f"activity: {rule}"
         if not keep:
-            J.save_job(conn, full, status="dropped", drop_reason=reason)
+            J.save_job(conn, full, status="dropped", drop_reason=reason, activity_label=label)
             result.dropped += 1
             continue
         t, estimated, rate = tier(full, settings)
@@ -518,6 +526,7 @@ def _process(
                 rate_paid=rate,
                 red_flags=flag_list,
                 drop_reason=why,
+                activity_label=label,
             )
             result.dropped += 1
             continue
@@ -529,6 +538,7 @@ def _process(
             tier_estimated=estimated,
             rate_paid=rate,
             red_flags=flag_list,
+            activity_label=label,
         )
         full.update(tier=t, tier_estimated=estimated, rate_paid=rate, flags=flag_list)
         full["status"] = "candidate"
@@ -686,6 +696,9 @@ def main() -> int:
         with task_lock(config.data_dir, TASK):  # panel button and scheduler share this lock
             conn = init_db(config.db_path)
             result = run_daily(conn, Settings(conn), config)
+    except ClaudeCancelled:  # the user pressed Cancel: stop cleanly, the lock is released
+        log.warning("%s was cancelled by the user", TASK)
+        return 0
     except TaskBusy:
         log.warning("Daily task is already running: nothing started")
         return 0

@@ -176,20 +176,32 @@ def test_partial_endpoint(web, config):
 
 def test_finished_child_is_reaped(web, config, monkeypatch):
     app, client = web
+    if not os.path.exists(f"/proc/self/task/{os.getpid()}/children"):
+        pytest.skip("this kernel has no /proc children list")
+
+    def children():
+        out = {}
+        for task in os.listdir("/proc/self/task"):
+            try:
+                with open(f"/proc/self/task/{task}/children") as f:
+                    pids = f.read().split()
+            except OSError:
+                continue
+            for pid in pids:
+                try:
+                    with open(f"/proc/{pid}/stat") as s:
+                        out[pid] = s.read().rsplit(")", 1)[1].split()[0]
+                except OSError:
+                    pass
+        return out
+
+    # children left by earlier tests in this process are not ours
+    before = set(children())
     monkeypatch.setenv("FAKE_TASK_SLEEP", "0")
     post_run(client)
     assert wait_until(lambda: len(runs(app)) == 1 and idle(config))
 
-    if not os.path.exists(f"/proc/self/task/{os.getpid()}/children"):
-        pytest.skip("this kernel has no /proc children list")
-
     def zombies():
-        out = []
-        for task in os.listdir("/proc/self/task"):
-            with open(f"/proc/self/task/{task}/children") as f:
-                for pid in f.read().split():
-                    with open(f"/proc/{pid}/stat") as s:
-                        out.append(s.read().rsplit(")", 1)[1].split()[0])
-        return [state for state in out if state == "Z"]
+        return [pid for pid, state in children().items() if state == "Z" and pid not in before]
 
     assert wait_until(lambda: not zombies(), 5)

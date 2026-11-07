@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, pill, page_header, info, icon %}
+{% from "_macros.html" import action_status, button, flash, card, pill, page_header, info, icon %}
 {% block title %}Setup{% endblock %}
 {% block main_class %}medium{% endblock %}
 {% block content %}
 {% call page_header("Setup", "setup.intro") %}{% endcall %}
+{% if action_id %}<div class="action-line" id="setup-action">{{ action_status(action_id) }}</div>{% endif %}
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 {% if finished %}{{ flash("info", "Setup is finished. You can still change any step here.") }}{% endif %}

@@ -38,14 +38,25 @@ def _ratio(a: str, b: str) -> float:
 
 # (text token, background token): body text needs 4.5
 PAIRS = [
-    ("text", "bg"), ("text", "surface"), ("text", "surface-2"),
-    ("muted", "bg"), ("muted", "surface"), ("muted", "surface-2"),
-    ("accent", "bg"), ("accent", "surface"), ("accent", "accent-soft"),
-    ("accent-text", "accent"), ("accent-text", "accent-hover"),
-    ("ok", "ok-soft"), ("ok", "surface"),
-    ("warn", "warn-soft"), ("warn", "surface"),
-    ("bad", "bad-soft"), ("bad", "surface"),
-    ("info", "info-soft"), ("info", "surface"),
+    ("text", "bg"),
+    ("text", "surface"),
+    ("text", "surface-2"),
+    ("muted", "bg"),
+    ("muted", "surface"),
+    ("muted", "surface-2"),
+    ("accent", "bg"),
+    ("accent", "surface"),
+    ("accent", "accent-soft"),
+    ("accent-text", "accent"),
+    ("accent-text", "accent-hover"),
+    ("ok", "ok-soft"),
+    ("ok", "surface"),
+    ("warn", "warn-soft"),
+    ("warn", "surface"),
+    ("bad", "bad-soft"),
+    ("bad", "surface"),
+    ("info", "info-soft"),
+    ("info", "surface"),
     ("tip-text", "tip-bg"),
 ]
 

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_macros.html" import action_status, button, empty, info, page_header %}
+{% block title %}Chat{% endblock %}
+{% block content %}
+{% call page_header("Chat", "chat.intro") %}
+  <form method="post" action="/chat/clear" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ button("Clear chat", "ghost", small=true) }}
+  </form>
+{% endcall %}
+
+{% if action_id %}<div class="action-line" id="chat-action">{{ action_status(action_id) }}</div>{% endif %}
+
+<section class="chat-log" id="chat-log" aria-label="Messages" aria-live="polite">
+  {% for m in messages %}
+  <article class="chat-msg chat-{{ m.role }}">
+    <div class="chat-who muted small">{{ "You" if m.role == "user" else "Assistant" }} &middot; {{ m.created | dt }}</div>
+    <div class="chat-text">{{ m.html }}</div>
+  </article>
+  {% else %}
+  {{ empty("inbox", "No messages yet. Ask how things stand.") }}
+  {% endfor %}
+</section>
+
+<form method="post" action="/chat/send" class="chat-form" id="chat-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label for="chat-input">Your question</label>
+  <textarea id="chat-input" name="message" rows="3" maxlength="{{ max_chars }}" placeholder="Ask about runs, jobs, reports or costs" required></textarea>
+  <div class="actions">{{ button("Send", "primary") }} {{ info("chat.readonly") }}</div>
+</form>
+{% endblock %}

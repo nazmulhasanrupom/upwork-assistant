@@ -25,8 +25,9 @@ from app.llm import prompting
 from app.llm.runner import ClaudeError
 from app.pages import job_page
 from app.upwork import writes
+from app.upwork.bridge import ClaudeUpworkBridge
 from app.upwork.client import UpworkMCPError
-from app.upwork.routes import bridge_for
+from app.worker import WorkerError, ensure_writes_open
 
 log = logging.getLogger("job.actions")
 
@@ -55,19 +56,6 @@ def _done(job_id: str, code: str) -> Response:
 
 def _fail(request: Request, job_id: str, text: str, kind: str = "error", **kw: Any) -> Response:
     return job_page(request, job_id, notice=(kind, text), status=kw.pop("status", 200), **kw)
-
-
-def _set_status(request: Request, job_id: str, status: str, only_from: tuple[str, ...]) -> None:
-    marks = ",".join("?" for _ in only_from)
-    request.app.state.db.execute(
-        f"UPDATE jobs SET status = ? WHERE job_id = ? AND status IN ({marks})",
-        (status, job_id, *only_from),
-    )
-
-
-def _writer(request: Request) -> writes.ClaudeUpworkWriter:
-    s = request.app.state
-    return writes.ClaudeUpworkWriter(s.config, s.settings, s.db)
 
 
 def _close(reader: Any) -> None:
@@ -160,6 +148,40 @@ def save_draft(
     return _done(job_id, code)
 
 
+# ---------------------------------------------------------------- the worker
+#
+# Prepare, answers, approve and remake are slow, so the route does the fast checks (login and CSRF
+# by the app-wide guard, form checks, kill switch, dry-run text) and queues the rest on the worker
+# (plan W2). The click is made here, in the POST handler, and travels inside `fn`. The route
+# answers with 303 to /jobs/<id>?action=<id>; the page polls until the action is done.
+
+
+def _queue(request: Request, kind: str, job_id: str, label: str, fn: Any) -> Response:
+    action_id = request.app.state.worker.submit(kind, job_id, label, fn, f"{kind}:{job_id}")
+    return RedirectResponse(f"/jobs/{job_id}?action={action_id}", status_code=303)
+
+
+def _outcome(job_id: str, code: str) -> tuple[str, str]:
+    """(result_url, message) for an action that ends well, from the fixed texts."""
+    return f"/jobs/{job_id}?msg={code}", ja.JOB_MESSAGES[code][1]
+
+
+def _make_bridge(factory: Any, config: Any, ctx: Any) -> Any:
+    return factory() if factory else ClaudeUpworkBridge(config, ctx.settings, ctx.conn)
+
+
+def _make_writer(config: Any, ctx: Any) -> writes.ClaudeUpworkWriter:
+    return writes.ClaudeUpworkWriter(config, ctx.settings, ctx.conn)
+
+
+def _set_status_conn(conn: Any, job_id: str, status: str, only_from: tuple[str, ...]) -> None:
+    marks = ",".join("?" for _ in only_from)
+    conn.execute(
+        f"UPDATE jobs SET status = ? WHERE job_id = ? AND status IN ({marks})",
+        (status, job_id, *only_from),
+    )
+
+
 # ---------------------------------------------------------------- prepare
 
 
@@ -193,47 +215,61 @@ def prepare(request: Request, job_id: str, boost_connects: str = Form("")) -> Re
         return blocked
     s = request.app.state
     draft = _draft(request, job_id)
-    click = writes.issue_click(request, "preview")
-    reader = None
     try:
-        reader = bridge_for(request)
-        answers = [a for a in ja.draft_answers(draft) if a["answer"].strip() or a["question"]]
-        result = writes.preview_proposal(
-            click,
-            conn=s.db,
-            config=s.config,
-            settings=s.settings,
-            reader=reader,
-            writer=_writer(request),
-            job_id=job_id,
-            cover_letter=draft["cover_letter"],
-            charged_amount=draft["suggested_rate"],
-            answers=answers,
-            boost_connects=_boost(boost_connects),
-        )
-        if result.status == "previewed":
-            org = str(s.settings.get("upwork.talent_org_uid"))
-            items = _fetch_highlights(
-                reader, org, int(s.settings.get("writes.highlights_max_shown"))
-            )
-            s.db.execute(
-                "UPDATE previews SET highlights_json = ? WHERE id = ?",
-                (
-                    json.dumps(items, ensure_ascii=False) if items is not None else None,
-                    result.row_id,
-                ),
-            )
-            _set_status(request, job_id, "prepared", ("candidate", "judged", "drafted", "seen"))
-    except writes.ExistingProposal:
-        return _done(job_id, "applied")
-    except (writes.WriteError, UpworkMCPError, ClaudeError) as exc:
+        boost = _boost(boost_connects)
+    except writes.WriteError as exc:
         return _fail(request, job_id, _error_text(exc))
-    finally:
-        if reader is not None:
-            _close(reader)
-    if result.status != "previewed":
-        return _fail(request, job_id, result.message or "The preview failed. Nothing was sent.")
-    return _done(job_id, "prepared")
+    click = writes.issue_click(request, "preview")
+    config = s.config
+    factory = getattr(s, "mcp_factory", None)
+    cover_letter = draft["cover_letter"]
+    rate = draft["suggested_rate"]
+    answers = [a for a in ja.draft_answers(draft) if a["answer"].strip() or a["question"]]
+
+    def work(ctx: Any) -> tuple[str, str]:
+        reader = None
+        try:
+            reader = _make_bridge(factory, config, ctx)
+            result = writes.preview_proposal(
+                click,
+                conn=ctx.conn,
+                config=config,
+                settings=ctx.settings,
+                reader=reader,
+                writer=_make_writer(config, ctx),
+                job_id=job_id,
+                cover_letter=cover_letter,
+                charged_amount=rate,
+                answers=answers,
+                boost_connects=boost,
+            )
+            if result.status == "previewed":
+                org = str(ctx.settings.get("upwork.talent_org_uid"))
+                items = _fetch_highlights(
+                    reader, org, int(ctx.settings.get("writes.highlights_max_shown"))
+                )
+                ctx.conn.execute(
+                    "UPDATE previews SET highlights_json = ? WHERE id = ?",
+                    (
+                        json.dumps(items, ensure_ascii=False) if items is not None else None,
+                        result.row_id,
+                    ),
+                )
+                _set_status_conn(
+                    ctx.conn, job_id, "prepared", ("candidate", "judged", "drafted", "seen")
+                )
+        except writes.ExistingProposal:
+            return _outcome(job_id, "applied")
+        except (writes.WriteError, UpworkMCPError, ClaudeError) as exc:
+            raise WorkerError(_error_text(exc)) from exc
+        finally:
+            if reader is not None:
+                _close(reader)
+        if result.status != "previewed":
+            raise WorkerError(result.message or "The preview failed. Nothing was sent.")
+        return _outcome(job_id, "prepared")
+
+    return _queue(request, "job_prepare", job_id, "Making the preview", work)
 
 
 # ---------------------------------------------------------------- the two questions
@@ -251,7 +287,6 @@ def answers(
     a new preview (the proposal changes), which is made with a new preview click."""
     if (blocked := _guard(request, job_id, "asked")) is not None:
         return blocked
-    s = request.app.state
     row, err = _live_preview(request, job_id, preview)
     if err is not None:
         return err
@@ -268,7 +303,8 @@ def answers(
     items = json.loads(row["highlights_json"]) if row["highlights_json"] else []
     picks = [h for h in items if h.get("key") in set(highlight or []) and h.get("param")]
     if not picks:
-        writes.mark_asked(s.db, row["id"], attachments=True, highlights=True)
+        # Fast and local (one row update): no worker needed.
+        writes.mark_asked(request.app.state.db, row["id"], attachments=True, highlights=True)
         return _done(job_id, "asked")
     return _repreview_with_highlights(request, job_id, row, picks)
 
@@ -284,45 +320,54 @@ def _repreview_with_highlights(
         if h["id"] not in extra[h["param"]]:
             extra[h["param"]].append(h["id"])
     click = writes.issue_click(request, "preview")
-    reader = None
-    try:
-        reader = bridge_for(request)
-        result = writes.preview_proposal(
-            click,
-            conn=s.db,
-            config=s.config,
-            settings=s.settings,
-            reader=reader,
-            writer=_writer(request),
-            job_id=job_id,
-            cover_letter=params["cover_letter"],
-            charged_amount=params.get("charged_amount", params.get("bid")),
-            answers=params.get("answers"),
-            boost_connects=params.get("boost_connects"),
-            boost_limits=json.loads(row["boost_json"]) if row["boost_json"] else None,
-            extra=extra,
-            attachments_asked=True,
-            highlights_asked=True,
+    config = s.config
+    factory = getattr(s, "mcp_factory", None)
+    old_id = row["id"]
+    old_highlights = row["highlights_json"]
+    boost_limits = json.loads(row["boost_json"]) if row["boost_json"] else None
+
+    def work(ctx: Any) -> tuple[str, str]:
+        reader = None
+        try:
+            reader = _make_bridge(factory, config, ctx)
+            result = writes.preview_proposal(
+                click,
+                conn=ctx.conn,
+                config=config,
+                settings=ctx.settings,
+                reader=reader,
+                writer=_make_writer(config, ctx),
+                job_id=job_id,
+                cover_letter=params["cover_letter"],
+                charged_amount=params.get("charged_amount", params.get("bid")),
+                answers=params.get("answers"),
+                boost_connects=params.get("boost_connects"),
+                boost_limits=boost_limits,
+                extra=extra,
+                attachments_asked=True,
+                highlights_asked=True,
+            )
+        except writes.ExistingProposal:
+            return _outcome(job_id, "applied")
+        except (writes.WriteError, UpworkMCPError, ClaudeError) as exc:
+            raise WorkerError(_error_text(exc)) from exc
+        finally:
+            if reader is not None:
+                _close(reader)
+        if result.status != "previewed":
+            raise WorkerError(result.message or "The preview failed. Nothing was sent.")
+        ctx.conn.execute(
+            "UPDATE previews SET highlights_json = ? WHERE id = ?",
+            (old_highlights, result.row_id),
         )
-    except writes.ExistingProposal:
-        return _done(job_id, "applied")
-    except (writes.WriteError, UpworkMCPError, ClaudeError) as exc:
-        return _fail(request, job_id, _error_text(exc))
-    finally:
-        if reader is not None:
-            _close(reader)
-    if result.status != "previewed":
-        return _fail(request, job_id, result.message or "The preview failed. Nothing was sent.")
-    s.db.execute(
-        "UPDATE previews SET highlights_json = ? WHERE id = ?",
-        (row["highlights_json"], result.row_id),
-    )
-    s.db.execute(
-        "UPDATE previews SET status = 'expired' WHERE id = ? AND confirmed_at IS NULL "
-        "AND status IN ('previewed', 'dry_run_blocked')",
-        (row["id"],),
-    )
-    return _done(job_id, "asked")
+        ctx.conn.execute(
+            "UPDATE previews SET status = 'expired' WHERE id = ? AND confirmed_at IS NULL "
+            "AND status IN ('previewed', 'dry_run_blocked')",
+            (old_id,),
+        )
+        return _outcome(job_id, "asked")
+
+    return _queue(request, "job_answers", job_id, "Making a new preview", work)
 
 
 # ---------------------------------------------------------------- approve / remake
@@ -337,27 +382,38 @@ def approve(request: Request, job_id: str, preview: int = Form(0)) -> Response:
     row, err = _live_preview(request, job_id, preview)
     if err is not None:
         return err
-    click = writes.issue_click(request, "confirm")
-    try:
-        result = writes.confirm_preview(
-            click,
-            conn=s.db,
-            config=s.config,
-            settings=s.settings,
-            writer=_writer(request),
-            row_id=row["id"],
-        )
-    except writes.PreviewExpired:
-        return _fail(request, job_id, "Preview expired. Re-make the preview below.", "warn")
-    except (writes.WriteError, UpworkMCPError, ClaudeError) as exc:
-        return _fail(request, job_id, _error_text(exc))
-    if result.status == "dry_run_blocked":
-        log.warning("dry-run: approve for job %s blocked (preview row %s)", job_id, row["id"])
-        return _done(job_id, "dry_run")
-    if result.sent:
-        _set_status(request, job_id, "sent", ("prepared", "candidate", "judged", "drafted", "seen"))
-        return _done(job_id, "sent")
-    return _fail(request, job_id, result.message or "Upwork did not accept it. Nothing was sent.")
+    click = writes.issue_click(request, "confirm")  # the user's click, made here only
+    config = s.config
+    row_id = row["id"]
+
+    def work(ctx: Any) -> tuple[str, str]:
+        # Settings can change while the action waits: the kill switch is read again right before
+        # the write, and confirm_preview reads dry-run again (and records the block).
+        ensure_writes_open(ctx.settings)
+        try:
+            result = writes.confirm_preview(
+                click,
+                conn=ctx.conn,
+                config=config,
+                settings=ctx.settings,
+                writer=_make_writer(config, ctx),
+                row_id=row_id,
+            )
+        except writes.PreviewExpired as exc:
+            raise WorkerError("Preview expired. Re-make the preview below.") from exc
+        except (writes.WriteError, UpworkMCPError, ClaudeError) as exc:
+            raise WorkerError(_error_text(exc)) from exc
+        if result.status == "dry_run_blocked":
+            log.warning("dry-run: approve for job %s blocked (preview row %s)", job_id, row_id)
+            return _outcome(job_id, "dry_run")
+        if result.sent:
+            _set_status_conn(
+                ctx.conn, job_id, "sent", ("prepared", "candidate", "judged", "drafted", "seen")
+            )
+            return _outcome(job_id, "sent")
+        raise WorkerError(result.message or "Upwork did not accept it. Nothing was sent.")
+
+    return _queue(request, "job_approve", job_id, "Approving the proposal", work)
 
 
 @router.post("/jobs/{job_id}/remake")
@@ -372,32 +428,40 @@ def remake(request: Request, job_id: str, preview: int = Form(0)) -> Response:
     if not view["show_remake"]:
         return _fail(request, job_id, "This preview has not expired.", "warn", status=409)
     click = writes.issue_click(request, "preview")
-    reader = None
-    try:
-        reader = bridge_for(request)
-        result = writes.remake_preview(
-            click,
-            conn=s.db,
-            config=s.config,
-            settings=s.settings,
-            reader=reader,
-            writer=_writer(request),
-            row_id=row["id"],
+    config = s.config
+    factory = getattr(s, "mcp_factory", None)
+    row_id = row["id"]
+    old_highlights = row["highlights_json"]
+
+    def work(ctx: Any) -> tuple[str, str]:
+        reader = None
+        try:
+            reader = _make_bridge(factory, config, ctx)
+            result = writes.remake_preview(
+                click,
+                conn=ctx.conn,
+                config=config,
+                settings=ctx.settings,
+                reader=reader,
+                writer=_make_writer(config, ctx),
+                row_id=row_id,
+            )
+        except writes.ExistingProposal:
+            return _outcome(job_id, "applied")
+        except (writes.WriteError, UpworkMCPError, ClaudeError) as exc:
+            raise WorkerError(_error_text(exc)) from exc
+        finally:
+            if reader is not None:
+                _close(reader)
+        if result.status != "previewed":
+            raise WorkerError(result.message or "The preview failed. Nothing was sent.")
+        ctx.conn.execute(
+            "UPDATE previews SET highlights_json = ? WHERE id = ?",
+            (old_highlights, result.row_id),
         )
-    except writes.ExistingProposal:
-        return _done(job_id, "applied")
-    except (writes.WriteError, UpworkMCPError, ClaudeError) as exc:
-        return _fail(request, job_id, _error_text(exc))
-    finally:
-        if reader is not None:
-            _close(reader)
-    if result.status != "previewed":
-        return _fail(request, job_id, result.message or "The preview failed. Nothing was sent.")
-    s.db.execute(
-        "UPDATE previews SET highlights_json = ? WHERE id = ?",
-        (row["highlights_json"], result.row_id),
-    )
-    return _done(job_id, "remade")
+        return _outcome(job_id, "remade")
+
+    return _queue(request, "job_remake", job_id, "Making a fresh preview", work)
 
 
 # ---------------------------------------------------------------- skip

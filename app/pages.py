@@ -21,9 +21,11 @@ from app import costs as cost_totals
 from app import metrics as metrics_data
 from app import rank as rank_data
 from app.auth_routes import render
+from app.filters import activity as act
 from app.llm import prompting
 from app.tasks import lock, trigger
 from app.upwork.jobs import CLOSE_TAG, OPEN_TAG
+from app.worker import safe_local_url
 
 router = APIRouter()
 
@@ -117,6 +119,8 @@ def install_filters(templates: Any, tz_name: str) -> None:
     env.filters["md"] = markdown_lite.render
     env.filters["rate"] = fmt_rate
     env.filters["untrusted"] = strip_untrusted
+    env.filters["act_name"] = lambda v: str(v or act.UNKNOWN).capitalize()
+    env.filters["act_kind"] = lambda v: ACTIVITY_KIND.get(str(v or ""), "")
     env.filters["budget"] = lambda job: budget_text(job)[0]
     env.filters["budget_note"] = lambda job: budget_text(job)[1]
 
@@ -382,6 +386,16 @@ def save_profile_views(request: Request, views: str = Form("")) -> Response:
 # ---------------------------------------------------------------- jobs list
 
 
+ACTIVITY_KIND = {act.POTENTIAL: "ok", act.GOOD: "ok", act.SUSPICIOUS: "warn", act.HIDE: "error"}
+
+# Default order: activity label first (best first), then newest. NULL counts as UNKNOWN.
+_ACTIVITY_SORT = (
+    "CASE COALESCE(NULLIF(j.activity_label, ''), 'UNKNOWN') "
+    + " ".join(f"WHEN '{label}' THEN {i}" for i, label in enumerate(act.LABELS[1:]))
+    + f" ELSE {len(act.LABELS)} END"
+)
+
+
 @router.get("/jobs")
 def jobs_list(
     request: Request,
@@ -391,6 +405,7 @@ def jobs_list(
     date_to: str = "",
     afford: str = "",
     q: str = "",
+    activity: str = "",
     page: int = 1,
 ) -> Response:
     conn: sqlite3.Connection = request.app.state.db
@@ -399,8 +414,15 @@ def jobs_list(
     tier = tier.upper() if tier.upper() in TIERS else ""
     status = status if status in STATUSES or status == STATUS_ALL else STATUS_ACTIVE
     day_from, day_to = _parse_day(date_from), _parse_day(date_to)
+    activity = activity.upper() if activity.upper() in act.LABELS else ""
 
     where, args = [], []
+    if activity == act.UNKNOWN:
+        where.append("(j.activity_label IS NULL OR j.activity_label IN ('', ?))")
+        args.append(activity)
+    elif activity:
+        where.append("j.activity_label = ?")
+        args.append(activity)
     if tier:
         where.append("j.tier = ?")
         args.append(tier)
@@ -440,7 +462,7 @@ def jobs_list(
         f"SELECT j.*, g.fit_score, g.why_apply, g.plan AS plan_json, "
         f"EXISTS (SELECT 1 FROM drafts d WHERE d.job_id = j.job_id) AS has_draft FROM jobs j "
         f"LEFT JOIN judgements g ON g.job_id = j.job_id {clause} "
-        f"ORDER BY j.first_seen DESC, j.rate_paid DESC LIMIT ? OFFSET ?",
+        f"ORDER BY {_ACTIVITY_SORT}, j.first_seen DESC, j.rate_paid DESC LIMIT ? OFFSET ?",
         [*args, size, (page - 1) * size],
     ).fetchall()
     cards = []
@@ -467,6 +489,7 @@ def jobs_list(
             "date_to": date_to,
             "afford": afford,
             "q": q,
+            "activity": activity,
         }
         query = {k: v for k, v in query.items() if v}
         query["page"] = str(n)
@@ -489,6 +512,8 @@ def jobs_list(
         f_to=day_to.isoformat() if day_to else "",
         f_afford=afford,
         f_q=q,
+        f_activity=activity,
+        activity_labels=act.LABELS,
         hide_default=bool(request.app.state.settings.get("ui.hide_unaffordable")),
         balance=balance,
     )
@@ -498,8 +523,17 @@ def jobs_list(
 
 
 @router.get("/jobs/{job_id}")
-def job_detail(request: Request, job_id: str, msg: str = "") -> Response:
-    return job_page(request, job_id, notice=job_actions.JOB_MESSAGES.get(msg))
+def job_detail(request: Request, job_id: str, msg: str = "", action: str = "") -> Response:
+    action_id = ""
+    if action:
+        row = request.app.state.worker.get(action)
+        if row is not None and row["target"] == job_id:
+            action_id = action
+            url = safe_local_url(row["result_url"])
+            if row["status"] == "done" and url and url != f"/jobs/{job_id}?action={action}":
+                # Done already (a quick action): show its result at once, like a plain redirect.
+                return RedirectResponse(url, status_code=303)
+    return job_page(request, job_id, notice=job_actions.JOB_MESSAGES.get(msg), action_id=action_id)
 
 
 def job_page(
@@ -510,6 +544,7 @@ def job_page(
     status: int = 200,
     edit: dict[str, Any] | None = None,
     edit_dashes: bool = False,
+    action_id: str = "",
 ) -> Response:
     """The job page. `notice` is (kind, text) for the flash on top; `edit` re-opens the draft form
     with what the user typed (plan H2)."""
@@ -542,6 +577,7 @@ def job_page(
         act=job_actions.build_view(conn, settings, row, draft),
         edit=edit,
         edit_dashes=edit_dashes,
+        action_id=action_id,
         max_letter=int(settings.get("writes.cover_letter_max_chars")),
         max_answer=int(settings.get("writes.answer_max_chars")),
         connects_balance=latest["balance"] if latest else None,

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, badge, pill, empty, page_header, jobs_tabs, icon %}
+{% from "_macros.html" import button, badge, pill, empty, page_header, jobs_tabs, icon, info %}
 {% block title %}Jobs{% endblock %}
 {% block content %}
 {% call page_header("Jobs", "jobs.score") %}
@@ -12,6 +12,12 @@
     <select name="tier">
       <option value="">all</option>
       {% for t in tiers %}<option value="{{ t }}"{% if t == f_tier %} selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="field"><span>Activity {{ info("jobs.activity") }}</span>
+    <select name="activity">
+      <option value="">all</option>
+      {% for a in activity_labels %}<option value="{{ a }}"{% if a == f_activity %} selected{% endif %}>{{ a | act_name }}</option>{% endfor %}
     </select>
   </label>
   <label class="field"><span>Status</span>
@@ -59,6 +65,7 @@
       <a href="/jobs/{{ j.job_id }}">{{ j.title or j.job_id }}</a>
       <div class="row-sub">
         {% if j.status != "candidate" %}{{ pill(j.status, "status-pill") }}{% endif %}
+        {{ pill(j.activity_label | act_name, j.activity_label | act_kind) }}
         {% if j.has_draft %}{{ pill("Draft ready", "ok") }}{% endif %}
         {% if j.can_afford is false %}<span class="pill warn cant-afford"{% if j.connects_cost is not none and j.connects_balance is not none %} title="Costs {{ j.connects_cost }} Connects, you have {{ j.connects_balance }}"{% endif %}>Can't afford</span>{% endif %}
         {% if j.drop_reason %}<span class="muted small">Dropped: {{ j.drop_reason }}</span>{% endif %}
@@ -68,7 +75,7 @@
     <td>{{ j | budget }}{% if j.rate_paid %}<div class="muted small">{{ j.rate_paid | rate }} paid</div>{% endif %}</td>
     <td>{% if j.client_rating is not none %}<span class="stars" aria-label="Rating {{ j.client_rating }} of 5">&#9733; {{ "%.1f"|format(j.client_rating) }}</span>{% else %}<span class="muted">no rating</span>{% endif %}
       <div class="muted small">{{ (j.client_spend | money) or "n/a" }} spent</div></td>
-    <td class="nowrap"><time>{{ j.first_seen | dt }}</time></td>
+    <td class="nowrap"><time>{{ (j.posted_at or j.first_seen) | dt }}</time></td>
     <td class="num">{% if j.fit_score is not none %}<strong>{{ j.fit_score }}</strong>{% else %}<span class="muted">-</span>{% endif %}</td>
   </tr>
   {% endfor %}

@@ -44,6 +44,7 @@ class FakeMessages:
 def web(config):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     app.state.settings.set("upwork.talent_org_uid", ORG)
     app.state.mcp = FakeMessages()
     app.state.mcp_factory = lambda: app.state.mcp
@@ -51,8 +52,13 @@ def web(config):
 
 
 def post(client, path, **data):
+    """Click, then follow the redirect to the page that shows the action's result."""
     token = csrf_from(client.get("/inbox").text)
-    return client.post(path, data={"csrf_token": token, **data})
+    r = client.post(path, data={"csrf_token": token, **data})
+    if r.status_code == 303:
+        assert "/inbox?action=" in r.headers["location"]
+        return client.get(r.headers["location"])
+    return r
 
 
 def add_invite(conn, invite_id="inv-1", job_id="4000000000000000001", title="Build a bot", **kw):
@@ -176,14 +182,14 @@ def test_refresh_tool_error_is_shown(web):
     app, client = web
     app.state.mcp.payload = RuntimeError("tool exploded")
     r = post(client, "/inbox/refresh")
-    assert r.status_code == 400 and "Could not read the messages" in r.text
+    assert "Could not read the messages" in r.text and "Failed" in r.text
 
 
 def test_refresh_auth_error_is_shown(web):
     app, client = web
     app.state.mcp.payload = UpworkAuthError("Upwork login in Claude Code is missing or expired.")
     r = post(client, "/inbox/refresh")
-    assert r.status_code == 400 and "login in Claude Code" in r.text
+    assert "login in Claude Code" in r.text and "Failed" in r.text
     assert app.state.mcp.closed
 
 
@@ -191,7 +197,7 @@ def test_refresh_without_account(web):
     app, client = web
     app.state.settings.set("upwork.talent_org_uid", "")
     r = post(client, "/inbox/refresh")
-    assert r.status_code == 400 and "No freelancer account" in r.text
+    assert "No freelancer account" in r.text and "Failed" in r.text
     assert app.state.mcp.calls == []
 
 
@@ -343,7 +349,7 @@ def test_empty_answer_stores_nothing(web, fake_claude_gen):
     fake_claude_gen.env("FAKE_REPLY_EMPTY", "1")
     add_invite(app.state.db)
     r = post(client, "/inbox/invite/inv-1/draft")
-    assert r.status_code == 400 and "no reply text" in r.text
+    assert "no reply text" in r.text and "Failed" in r.text
     assert app.state.db.execute("SELECT draft_reply FROM invites").fetchone()[0] is None
 
 
@@ -352,7 +358,7 @@ def test_rate_limit_is_shown(web, fake_claude_gen):
     fake_claude_gen.env("FAKE_GEN_LIMIT_AFTER", "0")
     add_invite(app.state.db)
     r = post(client, "/inbox/invite/inv-1/draft")
-    assert r.status_code == 400 and "rate limited" in r.text
+    assert "rate limited" in r.text and "Failed" in r.text
 
 
 def test_cap_reached_blocks_the_call(web, fake_claude_gen):
@@ -364,13 +370,13 @@ def test_cap_reached_blocks_the_call(web, fake_claude_gen):
     )
     add_invite(app.state.db)
     r = post(client, "/inbox/invite/inv-1/draft")
-    assert r.status_code == 400 and not fake_claude_gen.called()
+    assert "Failed" in r.text and not fake_claude_gen.called()
 
 
 def test_unknown_items(web, fake_claude_gen):
     _, client = web
-    assert post(client, "/inbox/invite/nope/draft").status_code == 400
-    assert post(client, "/inbox/room/nope/draft").status_code == 400
+    assert "Failed" in post(client, "/inbox/invite/nope/draft").text
+    assert "Failed" in post(client, "/inbox/room/nope/draft").text
     assert not fake_claude_gen.called()
 
 
@@ -397,3 +403,37 @@ def test_missing_user_md_is_said_in_the_prompt(web, fake_claude_gen):
     add_invite(app.state.db)
     post(client, "/inbox/invite/inv-1/draft")
     assert "No user facts yet" in fake_claude_gen.log()["prompt"]
+
+
+# ---------- the worker (plan W3) ----------
+
+
+def test_refresh_returns_at_once_and_runs_later(web):
+    app, client = web
+    app.state.worker.sync = False
+    jobs = []
+
+    class Held:
+        def submit(self, fn, *args):
+            jobs.append((fn, args))
+
+    app.state.worker._pool = lambda: Held()
+    token = csrf_from(client.get("/inbox").text)
+    r = client.post("/inbox/refresh", data={"csrf_token": token})
+    assert r.status_code == 303 and "/inbox?action=" in r.headers["location"]
+    assert app.state.mcp.calls == []  # nothing ran yet
+    page = client.get(r.headers["location"])
+    assert "Waiting" in page.text and 'hx-get="/actions/' in page.text
+    # a second click while it waits shares the same action
+    r2 = client.post("/inbox/refresh", data={"csrf_token": token})
+    assert r2.headers["location"] == r.headers["location"] and len(jobs) == 1
+    fn, args = jobs[0]
+    fn(*args)
+    assert "Read 2 chat room(s)." in client.get(r.headers["location"]).text
+
+
+def test_refresh_is_stopped_by_the_kill_switch(web):
+    app, client = web
+    app.state.settings.set("general.kill_switch", True)
+    r = post(client, "/inbox/refresh")
+    assert "Stopped by kill switch" in r.text and app.state.mcp.calls == []

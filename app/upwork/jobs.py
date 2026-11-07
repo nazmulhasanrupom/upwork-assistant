@@ -14,6 +14,7 @@ import sqlite3
 from datetime import UTC, date, datetime
 from typing import Any
 
+from app.filters.activity import posted_text
 from app.settings import Settings, load_defaults
 from app.upwork.client import CallBudgetExceeded, ToolResult, UpworkToolError
 
@@ -148,6 +149,15 @@ def _type(value: Any) -> str | None:
 # ---------------------------------------------------------------- detail
 
 
+def _activity(value: Any) -> dict[str, Any] | None:
+    """job_activity as a plain dict, or None when the answer has none."""
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _count(value: Any) -> int | None:
+    return None if isinstance(value, bool) else _int(value)
+
+
 def parse_detail(payload: Any) -> dict[str, Any]:
     """Flatten a `find_jobs get` answer into the few facts we use."""
     if not isinstance(payload, dict):
@@ -199,6 +209,9 @@ def parse_detail(payload: Any) -> dict[str, Any]:
         "can_apply": can_apply if isinstance(can_apply, bool) else None,
         "plan": payload.get("plan"),
         "proposals_tier_unavailable": bool(payload.get("proposals_tier_unavailable")),
+        "applied": payload.get("applied") if isinstance(payload.get("applied"), bool) else None,
+        "proposals_tier": payload.get("proposals_tier"),
+        "job_activity": _activity(payload.get("job_activity")),
         "screening_questions": [q for q in (questions or []) if isinstance(q, str)],
         "reviews": reviews,
     }
@@ -333,7 +346,13 @@ def cut_down(
         "hourly_budget_type": _budget_type(detail, sj),
         "experience_level": pick("experience_level", sj.get("experience_level")),
         "duration": sj.get("duration"),
-        "proposals_tier": sj.get("proposals_tier"),
+        "proposals_tier": pick("proposals_tier", sj.get("proposals_tier")),
+        "proposal_count": _count(sj.get("proposal_count")),
+        "job_activity": pick("job_activity", _activity(sj.get("job_activity"))),
+        "published_date": sj.get("published_date"),
+        "created_date": sj.get("created_date"),
+        "freelancers_to_hire": _count(sj.get("freelancers_to_hire")),
+        "applied": detail.get("applied"),
         "skills": [s for s in sj.get("skills") or [] if isinstance(s, str)],
         "payment_verified": payment_verified,
         "client_country": pick("client_country", client.get("country")),
@@ -379,6 +398,9 @@ def apply_detail(
         "connects_balance",
         "can_apply",
         "fixed_budget",
+        "applied",
+        "proposals_tier",
+        "job_activity",
     ):
         if detail.get(key) is not None:
             out[key] = detail[key]
@@ -519,6 +541,7 @@ def save_job(
     rate_paid: float | None = None,
     red_flags: list[str] | None = None,
     drop_reason: str | None = None,
+    activity_label: str | None = None,
 ) -> None:
     """Insert or update one row in `jobs`. first_seen is kept on update.
 
@@ -534,8 +557,8 @@ def save_job(
         INSERT INTO jobs(job_id, first_seen, title, url, job_type, budget_min, budget_max,
             client_spend, client_hours, client_hires, client_rating, client_reviews,
             rate_paid, tier, tier_estimated, proposals_tier, connects_cost, red_flags, status,
-            drop_reason, hourly_budget_type, details)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            drop_reason, hourly_budget_type, details, activity_label, posted_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(job_id) DO UPDATE SET
             title=excluded.title, url=excluded.url, job_type=excluded.job_type,
             budget_min=excluded.budget_min, budget_max=excluded.budget_max,
@@ -546,7 +569,9 @@ def save_job(
             proposals_tier=excluded.proposals_tier, connects_cost=excluded.connects_cost,
             red_flags=excluded.red_flags, status=excluded.status,
             drop_reason=excluded.drop_reason, hourly_budget_type=excluded.hourly_budget_type,
-            details=excluded.details
+            details=excluded.details,
+            activity_label=COALESCE(excluded.activity_label, jobs.activity_label),
+            posted_at=COALESCE(excluded.posted_at, jobs.posted_at)
         """,
         (
             str(job["id"]),
@@ -571,6 +596,8 @@ def save_job(
             drop_reason,
             job.get("hourly_budget_type"),
             json.dumps(job, ensure_ascii=False),
+            activity_label,
+            posted_text(job),
         ),
     )
 

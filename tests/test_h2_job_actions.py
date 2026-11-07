@@ -77,6 +77,7 @@ def web(config, fake_claude_stream, tmp_path, monkeypatch):
     rules(tmp_path, monkeypatch, preview_rule(), confirm_rule())
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W2)
     app.state.settings.set("upwork.talent_org_uid", ORG)
     app.state.reader = FakeReader()
     app.state.mcp_factory = lambda: app.state.reader
@@ -117,8 +118,13 @@ def post(client, path, job_id=JOB, token=None, **data):
 
 
 def follow(client, r):
+    """Follow the click's redirect. A finished action (the tests run them inline) redirects once
+    more, to its result page."""
     assert r.status_code == 303, r.text[:300]
-    return client.get(r.headers["location"])
+    r = client.get(r.headers["location"])
+    while r.status_code == 303:
+        r = client.get(r.headers["location"])
+    return r
 
 
 def preview_row(conn, job_id=JOB):
@@ -287,8 +293,8 @@ def test_prepare_already_applied_stops_before_any_preview(web):
     seed(app.state.db, SENT_JOB)  # SENT_JOB is in list_proposals.json
     token = csrf_from(page(client, SENT_JOB).text)
     r = client.post(f"/jobs/{SENT_JOB}/prepare", data={"csrf_token": token})
-    assert r.status_code == 303 and r.headers["location"].endswith("msg=applied")
-    assert "Already applied" in client.get(r.headers["location"]).text
+    assert str(follow(client, r).url).endswith("msg=applied")
+    assert "Already applied" in follow(client, r).text
     assert not app.state.claude.called()  # no write run at all
     assert preview_row(app.state.db, SENT_JOB) is None
 
@@ -311,7 +317,7 @@ def test_prepare_failure_shows_the_reason_and_no_ready_preview(web, tmp_path, mo
         monkeypatch,
         {"tool": "manage_proposals", "text": "Job not found", "is_error": True},
     )
-    r = post(client, "prepare")
+    r = follow(client, post(client, "prepare"))
     assert r.status_code == 200 and "Job not found" in r.text
     assert preview_row(app.state.db)["status"] == "failed"
     assert not ja.build_view(app.state.db, app.state.settings, *_job_draft(app))["live"]
@@ -355,11 +361,11 @@ def test_boost_out_of_range_is_refused_with_the_range(web):
     app, client = web
     prepare(client)
     n = len(app.state.claude.logs())
-    r = post(client, "prepare", boost_connects="99")
+    r = follow(client, post(client, "prepare", boost_connects="99"))
     assert r.status_code == 200 and "between 10 and 30" in r.text
     assert len(app.state.claude.logs()) == n  # refused before claude ran
     r = post(client, "prepare", boost_connects="lots")
-    assert "whole number" in r.text
+    assert r.status_code == 200 and "whole number" in r.text  # refused in the route, no action
 
 
 # ---------------------------------------------------------------- the two questions
@@ -419,7 +425,7 @@ def test_picked_highlight_makes_a_new_preview_with_its_id(web, tmp_path, monkeyp
     first = preview_row(app.state.db)
     key = next(h["key"] for h in json.loads(first["highlights_json"]) if h["id"] == "pf-1")
     r = answer_both(client, app, highlight=key)
-    assert r.status_code == 303 and r.headers["location"].endswith("msg=asked")
+    assert str(follow(client, r).url).endswith("msg=asked")
     new = preview_row(app.state.db)
     assert new["id"] != first["id"] and new["preview_id"] == "pv-with-hl"
     assert json.loads(new["request_json"])["params"]["portfolio_project_ids"] == ["pf-1"]
@@ -455,8 +461,10 @@ def test_approve_in_dry_run_does_not_send_and_is_logged(web, caplog):
     row = preview_row(app.state.db)
     with caplog.at_level("WARNING"):
         r = post(client, "approve", preview=row["id"])
-    assert r.status_code == 303 and r.headers["location"].endswith("msg=dry_run")
-    html = follow(client, r).text
+    assert "?action=" in r.headers["location"]
+    done = follow(client, r)
+    assert str(done.url).endswith("msg=dry_run")
+    html = done.text
     assert "Dry-run: not sent" in html
     row = preview_row(app.state.db)
     assert row["status"] == "dry_run_blocked" and row["confirmed_at"] is None
@@ -488,8 +496,9 @@ def test_approve_with_dry_run_off_sends_once(web):
     answer_both(client, app)
     row = preview_row(app.state.db)
     r = post(client, "approve", preview=row["id"])
-    assert r.headers["location"].endswith("msg=sent")
-    assert "Sent to Upwork." in follow(client, r).text
+    done = follow(client, r)
+    assert str(done.url).endswith("msg=sent")
+    assert "Sent to Upwork." in done.text
     assert claude_tools(app.state.claude) == ["manage_proposals", "confirm_preview"]
     assert preview_row(app.state.db)["status"] == "confirmed"
     assert (
@@ -509,7 +518,9 @@ def test_approve_failed_confirm_shows_error(web, tmp_path, monkeypatch):
     prepare(client)
     answer_both(client, app)
     r = post(client, "approve", preview=preview_row(app.state.db)["id"])
-    assert r.status_code == 200 and "Upwork said no" in r.text
+    assert r.status_code == 303 and "?action=" in r.headers["location"]
+    r = follow(client, r)  # the failed action shows its message in the Apply card
+    assert r.status_code == 200 and "Upwork said no" in r.text and "Failed" in r.text
     assert (
         app.state.db.execute("SELECT status FROM jobs WHERE job_id = ?", (JOB,)).fetchone()[0]
         == "prepared"
@@ -540,7 +551,9 @@ def test_expired_preview_shows_remake_and_approve_says_expired(web, tmp_path, mo
     # re-make: a new preview, same letter, flags carried over
     rules(tmp_path, monkeypatch, preview_rule("pv-0000-bbbb"), confirm_rule())
     r = post(client, "remake", preview=old["id"])
-    assert r.status_code == 303 and r.headers["location"].endswith("msg=remade")
+    assert r.status_code == 303 and "?action=" in r.headers["location"]
+    done = follow(client, r)
+    assert str(done.url).endswith("msg=remade")
     new = preview_row(app.state.db)
     assert new["id"] != old["id"] and new["preview_id"] == "pv-0000-bbbb"
     assert new["attachments_asked"] == 1 and new["highlights_asked"] == 1
@@ -707,3 +720,126 @@ def test_highlight_limit_is_a_setting(web):
     app.state.settings.set("writes.highlights_max_shown", 1)
     html = prepare(client).text
     assert "CRM sync demo" in html and "n8n expert" not in html
+
+
+# ---------------------------------------------------------------- the worker (plan W2)
+
+
+class HeldPool:
+    """Stands in for the thread pool: remembers the work so a test can run it later."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def submit(self, fn, *args):
+        self.jobs.append((fn, args))
+
+    def run_all(self):
+        jobs, self.jobs = self.jobs, []
+        for fn, args in jobs:
+            fn(*args)
+
+
+def hold(app):
+    pool = HeldPool()
+    app.state.worker.sync = False
+    app.state.worker._pool = lambda: pool
+    return pool
+
+
+def action_id(r):
+    assert r.status_code == 303, r.text[:300]
+    loc = r.headers["location"]
+    assert loc.startswith(f"/jobs/{JOB}?action=")
+    return loc.split("action=")[1]
+
+
+def test_click_returns_at_once_with_an_action_and_the_work_runs_later(web):
+    app, client = web
+    pool = hold(app)
+    aid = action_id(post(client, "prepare"))
+    assert len(pool.jobs) == 1
+    assert preview_row(app.state.db) is None  # nothing ran inside the click
+    assert not app.state.claude.called()
+    row = app.state.worker.get(aid)
+    assert row["status"] == "queued" and row["kind"] == "job_prepare" and row["target"] == JOB
+    html = page_with_action(client, aid).text
+    assert f'hx-get="/actions/{aid}"' in html and "Waiting" in html
+    assert "Prepare makes a preview on Upwork and sends nothing" in html  # safety text stays
+    pool.run_all()
+    assert app.state.worker.get(aid)["status"] == "done"
+    assert preview_row(app.state.db)["status"] == "previewed"
+    r = client.get(f"/actions/{aid}", headers={"HX-Request": "true"})
+    assert r.headers["HX-Redirect"] == f"/jobs/{JOB}?msg=prepared"
+
+
+def page_with_action(client, aid):
+    r = client.get(f"/jobs/{JOB}?action={aid}")
+    assert r.status_code == 200
+    return r
+
+
+def test_double_click_starts_the_work_once(web):
+    app, client = web
+    pool = hold(app)
+    token = csrf_from(page(client).text)
+    first = action_id(post(client, "prepare", token=token))
+    second = action_id(post(client, "prepare", token=token))
+    assert first == second and len(pool.jobs) == 1
+    assert app.state.db.execute("SELECT COUNT(*) FROM actions").fetchone()[0] == 1
+
+
+def test_kill_switch_blocks_before_submit(web):
+    app, client = web
+    pool = hold(app)
+    app.state.settings.set("general.kill_switch", True)
+    for path in ("prepare", "remake", "approve", "answers"):
+        r = post(client, path, preview=1, attachments="none")
+        assert r.status_code == 409 and "kill switch" in r.text.lower()
+    assert not pool.jobs
+    assert app.state.db.execute("SELECT COUNT(*) FROM actions").fetchone()[0] == 0
+
+
+def test_kill_switch_turned_on_while_queued_stops_the_work(web):
+    app, client = web
+    pool = hold(app)
+    aid = action_id(post(client, "prepare"))
+    app.state.settings.set("general.kill_switch", True)
+    pool.run_all()
+    row = app.state.worker.get(aid)
+    assert row["status"] == "failed" and "kill switch" in row["error"]
+    assert not app.state.claude.called() and preview_row(app.state.db) is None
+    assert "Stopped by kill switch" in page_with_action(client, aid).text
+
+
+def test_csrf_missing_starts_no_action(web):
+    app, client = web
+    pool = hold(app)
+    r = client.post(f"/jobs/{JOB}/prepare", data={})
+    assert r.status_code in (400, 403)
+    assert not pool.jobs and app.state.db.execute("SELECT COUNT(*) FROM actions").fetchone()[0] == 0
+
+
+def test_action_page_of_another_job_is_not_shown(web):
+    app, client = web
+    hold(app)
+    aid = action_id(post(client, "prepare"))
+    seed(app.state.db, "4000000000000000777")
+    html = client.get(f"/jobs/4000000000000000777?action={aid}").text
+    assert f'id="action-{aid}"' not in html
+
+
+def test_dry_run_turned_on_while_the_approve_waits_blocks_the_send(web):
+    app, client = web
+    app.state.settings.set("general.dry_run", False)
+    prepare(client)
+    answer_both(client, app)
+    row = preview_row(app.state.db)
+    pool = hold(app)
+    aid = action_id(post(client, "approve", preview=row["id"]))
+    app.state.settings.set("general.dry_run", True)  # changed while the action waited
+    pool.run_all()
+    assert claude_tools(app.state.claude) == ["manage_proposals"]  # no confirm_preview
+    assert preview_row(app.state.db)["status"] == "dry_run_blocked"
+    r = client.get(f"/actions/{aid}", headers={"HX-Request": "true"})
+    assert r.headers["HX-Redirect"] == f"/jobs/{JOB}?msg=dry_run"

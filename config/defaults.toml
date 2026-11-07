@@ -43,8 +43,53 @@ description_max_chars = 3000   # job text sent on to Claude is cut to this
 review_comment_chars = 200     # client review comments are cut to this
 max_reviews = 5                # latest client reviews kept per job
 
+[activity]                # plan F1: job activity filter (app/filters/activity.py)
+hide_age_hours = 48             # older than this counts as old
+fresh_hours = 24                # newer than this counts as fresh
+hide_min_proposals = 50         # this many proposals is crowded
+tier_min = ["Fewer than 5=0", "Less than 5=0", "5 to 10=5", "10 to 15=10", "15 to 20=15", "20 to 50=20", "50+=50"]   # "proposals tier text=low end"
+
 [daily]                   # SPEC 6.2, 9.1
 top_skills = 10                 # skills listed in the daily note
+
+[worker]                  # plan W1 (the in-app worker for long clicks)
+threads = 4                     # actions that run at the same time
+poll_seconds = 2                # how often a page asks if an action is done
+shutdown_wait_seconds = 5       # on stop, wait this long for running actions
+toast_seconds = 30              # a finished action shows its notice for this long
+clicks_per_item = 8             # clicks made up front for one approval (a preview per profile field, a confirm)
+
+[live]                    # plan L1 (the Claude jobs dock and Cancel)
+poll_seconds = 3                # how often the dock asks while Claude works
+idle_poll_seconds = 10          # how often it asks when nothing runs
+tail_lines = 40                 # lines of live output shown per job
+line_chars = 300                # one live output line is cut at this many characters
+prompt_chars = 1500             # the prompt is saved at the top of the log, cut at this size
+log_max_kb = 512                # a live log stops growing at this size
+log_keep_days = 7               # older live logs and rows are deleted
+cancel_grace_seconds = 5        # after the stop signal, wait this long, then force-kill
+check_seconds = 1.0             # how often a running job looks for a Cancel click
+heartbeat_seconds = 10          # how often a running job says it is alive
+stale_seconds = 120             # a job with no sign of life for this long is marked failed
+stream_claude = true            # ask Claude for a live stream so the dock can show its text
+
+[chat]                    # plan C1 (the Chat page: a read-only helper with no tools)
+model = "claude-sonnet-5-5"
+effort = "low"
+history_turns = 8               # earlier messages sent along with a new question
+max_lookups_per_turn = 3        # read-only lookups Claude may ask for before it must answer
+daily_cost_cap_usd = 1.0        # chat stops answering for the day at this cost
+max_budget_usd = 0.25           # cap for one Claude call in a chat turn
+timeout_seconds = 180
+max_message_chars = 1000        # longest question accepted
+max_reply_chars = 4000          # longest reply kept
+summary_runs = 5                # recent runs listed in the summary
+summary_errors = 3              # recent failed runs listed
+summary_reports = 2             # latest reports listed
+summary_jobs = 5                # best new jobs listed
+lookup_chars = 4000             # a lookup result is cut at this size
+log_tail_lines = 40             # lines of a run log a lookup returns
+search_results = 5              # hits a search lookup returns
 
 [ui]
 jobs_page_size = 50             # cards per page on /jobs

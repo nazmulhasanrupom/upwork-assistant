@@ -51,6 +51,7 @@ def token_body(**over):
 def web(config):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     return app, client
 
 
@@ -73,8 +74,12 @@ def connect(g):
 
 
 def post_form(client, path, html_source="/settings/email", **data):
+    """Click. A queued action (the test email) is followed to the page that shows its result."""
     token = csrf_from(client.get(html_source).text)
-    return client.post(path, data={"csrf_token": token, **data})
+    r = client.post(path, data={"csrf_token": token, **data})
+    if r.status_code == 303 and "/settings/email?action=" in r.headers["location"]:
+        return client.get(r.headers["location"])
+    return r
 
 
 # ---------- page ----------
@@ -408,7 +413,7 @@ def test_test_email_failure_and_not_connected(web, g):
     with respx.mock:
         respx.post(SEND_URL).mock(return_value=httpx.Response(500, json={}))
         r = post_form(client, "/settings/email/test")
-    assert r.status_code == 400 and "Test email failed" in r.text
+    assert "Failed" in r.text and "Test email failed" in r.text
 
 
 def test_recipient_setting_wins(web, g):
@@ -468,3 +473,27 @@ def test_unreadable_token_file_counts_as_not_connected(g, config):
     config.gmail_path.write_text("garbage")
     assert not g.connected()
     assert re.search("not connected", str(pytest.raises(GmailError, g.access_token).value), re.I)
+
+
+def test_test_email_returns_at_once_and_runs_later(web, g):
+    app, client = web
+    connect(g)
+    app.state.worker.sync = False
+    held = []
+
+    class Held:
+        def submit(self, fn, *args):
+            held.append((fn, args))
+
+    app.state.worker._pool = lambda: Held()
+    with respx.mock:
+        route = respx.post(SEND_URL).mock(return_value=httpx.Response(200, json={}))
+        token = csrf_from(client.get("/settings/email").text)
+        r = client.post("/settings/email/test", data={"csrf_token": token})
+        assert r.status_code == 303 and "/settings/email?action=" in r.headers["location"]
+        assert not route.called
+        again = client.post("/settings/email/test", data={"csrf_token": token})
+        assert again.headers["location"] == r.headers["location"] and len(held) == 1
+        held[0][0](*held[0][1])
+        assert route.called
+    assert "Test email sent to me@gmail.example" in client.get(r.headers["location"]).text

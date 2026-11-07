@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, pill, page_header %}
+{% from "_macros.html" import action_status, button, flash, card, pill, page_header %}
 {% block title %}Email{% endblock %}
 {% block main_class %}medium{% endblock %}
 {% block content %}
 {% call page_header("Email", "email.intro") %}{% endcall %}
+{% if action_id %}<div class="action-line" id="email-action">{{ action_status(action_id) }}</div>{% endif %}
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 {% if expired and not connected %}{{ flash("warn", "Gmail login expired. Connect Gmail again.") }}{% endif %}

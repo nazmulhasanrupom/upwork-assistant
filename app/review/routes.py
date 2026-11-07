@@ -10,12 +10,12 @@ only markup made here is the diff, which escapes every word first (app/review/di
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse, Response
 
 from app.auth_routes import render
@@ -23,6 +23,7 @@ from app.pages import _json
 from app.review import after_send, service
 from app.review import prechecks as pc
 from app.review.diff import word_diff
+from app.worker import WorkerError, known_action, safe_local_url
 
 log = logging.getLogger("review")
 
@@ -116,6 +117,7 @@ def _form_page(
     job_id: str = "",
     error: str = "",
     values: dict[str, Any] | None = None,
+    action_id: str = "",
 ) -> Response:
     s = request.app.state
     job = service.load_job(s.db, job_id) if job_id else None
@@ -138,14 +140,22 @@ def _form_page(
         rate=values.get("rate", ""),
         input_max=_int_setting(request, "review.input_max_chars"),
         error=error,
+        action_id=action_id,
         history=history(request),
         proposals=sent_proposals(request),
     )
 
 
 @router.get("/review")
-def review_index(request: Request, job_id: str = "") -> Response:
-    return _form_page(request, job_id=job_id.strip())
+def review_index(request: Request, job_id: str = "", action: str = "") -> Response:
+    worker = request.app.state.worker
+    action_id = known_action(worker, action)
+    if action_id:
+        row = worker.get(action_id)
+        url = safe_local_url(row["result_url"])
+        if row["status"] == "done" and url and url != f"/review?action={action_id}":
+            return RedirectResponse(url, status_code=303)  # done already: show the result
+    return _form_page(request, job_id=job_id.strip(), action_id=action_id)
 
 
 def _too_long(request: Request, *texts: str) -> bool:
@@ -204,21 +214,32 @@ async def review_submit(request: Request) -> Response:
     else:
         answers = []
 
-    try:
-        review_id = await run_in_threadpool(
-            service.run_review,
-            s.db,
-            s.config,
-            s.settings,
-            job=job,
-            cover_letter=cover,
-            answers=answers,
-            rate=rate,
-        )
-    except Exception:
-        log.exception("Review failed")
-        return again("The review failed. See the log.", 500)
-    return RedirectResponse(f"/review/{review_id}", status_code=303)
+    # The review is one slow Claude call: it runs on the worker (plan W3). The route answers at
+    # once with 303 to /review?action=<id>; when done the page goes to /review/<review_id>.
+    config = s.config
+    key_part = job["job_id"] or "pasted:" + hashlib.sha256(cover.encode()).hexdigest()[:12]
+
+    def work(ctx: Any) -> tuple[str, str]:
+        try:
+            review_id = service.run_review(
+                ctx.conn,
+                config,
+                ctx.settings,
+                job=job,
+                cover_letter=cover,
+                answers=answers,
+                rate=rate,
+            )
+        except Exception as exc:
+            log.exception("Review failed")
+            raise WorkerError("The review failed. See the log.") from exc
+        return f"/review/{review_id}", "The review is ready."
+
+    target = str(job["job_id"] or "pasted")
+    action_id = s.worker.submit(
+        "review", target, "Reviewing the proposal", work, f"review:{key_part}"
+    )
+    return RedirectResponse(f"/review?action={action_id}", status_code=303)
 
 
 # ---------------------------------------------------------------- result

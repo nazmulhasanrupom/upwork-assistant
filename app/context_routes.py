@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 
 from app import memory, versioning
 from app.auth_routes import render
@@ -35,8 +35,9 @@ from app.llm.runner import (
 )
 from app.memory import atomic_write, memory_file, normalize, read_file
 from app.upwork import accounts
+from app.upwork.bridge import ClaudeUpworkBridge
 from app.upwork.client import UpworkAuthError, UpworkMCPError
-from app.upwork.routes import bridge_for
+from app.worker import WorkerError, known_action
 
 log = logging.getLogger("context")
 
@@ -135,13 +136,13 @@ def fetch_profile(client: Any, settings: Any) -> tuple[Any, Any]:
     return profile, highlights
 
 
-def build_proposal(request: Request) -> tuple[str, float]:
+def build_proposal(
+    config: Config, settings: Any, conn: Any, factory: Any = None
+) -> tuple[str, float]:
     """Returns (proposed USER.md text, Claude cost in USD). Raises BuildError."""
-    s = request.app.state
-    config, settings, conn = s.config, s.settings, s.db
     client = None
     try:
-        client = bridge_for(request)
+        client = factory() if factory else ClaudeUpworkBridge(config, settings, conn)
         profile, highlights = fetch_profile(client, settings)
     except UpworkAuthError as e:
         raise BuildError(str(e)) from e
@@ -205,6 +206,7 @@ def _page(request: Request, status: int = 200, **ctx: Any) -> Response:
     ctx.setdefault("notice", "")
     ctx.setdefault("error", "")
     ctx.setdefault("cost", None)
+    ctx.setdefault("action_id", "")
     return render(
         request,
         "context.html",
@@ -232,8 +234,8 @@ def _clear_alert(request: Request) -> None:
 
 
 @router.get("/context")
-def context_page(request: Request) -> Response:
-    return _page(request)
+def context_page(request: Request, action: str = "") -> Response:
+    return _page(request, action_id=known_action(request.app.state.worker, action))
 
 
 @router.post("/context")
@@ -270,24 +272,26 @@ def context_save(request: Request, user_md: str = Form(""), style_md: str = Form
 
 @router.post("/context/build")
 def context_build(request: Request) -> Response:
+    # Reading the profile and the Claude call are slow: they run on the worker (plan W3).
     config = request.app.state.config
-    try:
-        proposed, cost = build_proposal(request)
-    except BuildError as e:
-        return _page(request, 400, error=str(e))
-    except Exception:
-        log.exception("Build USER.md failed")
-        return _page(request, 500, error="Could not build USER.md. See the log.")
-    try:
-        atomic_write(memory_file(config, PROPOSED_NAME), proposed)
-    except OSError:
-        log.exception("Could not keep the proposed USER.md")
-    return _page(
-        request,
-        proposed=proposed,
-        cost=cost,
-        notice="Here is a proposed USER.md. It is not saved until you click Use this.",
+    factory = getattr(request.app.state, "mcp_factory", None)
+
+    def work(ctx: Any) -> tuple[str, str]:
+        try:
+            proposed, cost = build_proposal(config, ctx.settings, ctx.conn, factory)
+        except BuildError as e:
+            raise WorkerError(str(e)) from e
+        try:
+            atomic_write(memory_file(config, PROPOSED_NAME), proposed)
+        except OSError:
+            log.exception("Could not keep the proposed USER.md")
+        text = "Here is a proposed USER.md. It is not saved until you click Use this."
+        return f"/context?action={ctx.action_id}", f"{text} Claude cost: ${cost:.4f}"
+
+    action_id = request.app.state.worker.submit(
+        "context_build", "user_md", "Building USER.md", work, "context_build"
     )
+    return RedirectResponse(f"/context?action={action_id}", status_code=303)
 
 
 @router.post("/context/use")

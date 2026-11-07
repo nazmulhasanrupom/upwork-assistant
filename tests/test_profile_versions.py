@@ -198,6 +198,7 @@ def test_fields_diff_uses_compare(conn, ready, config):
 def web(config):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     app.state.settings.set("upwork.talent_org_uid", ORG)
     app.state.mcp = FakeProfile()
     app.state.mcp_factory = lambda: app.state.mcp
@@ -277,9 +278,9 @@ def test_snapshot_button_shows_errors(web):
     app, client = web
     app.state.mcp = FakeProfile(UpworkAuthError("log in again"))
     r = post(client, "/profile/versions/snapshot")
-    assert r.status_code == 400 and "log in again" in r.text
+    assert "Failed" in r.text and "log in again" in r.text
     app.state.mcp = FakeProfile(RuntimeError("boom"))
-    assert post(client, "/profile/versions/snapshot").status_code == 502
+    assert "Could not read the profile" in post(client, "/profile/versions/snapshot").text
 
 
 def test_snapshot_needs_csrf(web):
@@ -361,9 +362,12 @@ def queue(app, client):
 
 def approve(client, item_id):
     token = csrf_from(client.get("/approvals").text)
-    return client.post(
+    r = client.post(
         f"/approvals/{item_id}/approve", data={"csrf_token": token}, follow_redirects=False
     )
+    assert r.status_code == 303 and "/approvals?action=" in r.headers["location"]
+    # a finished action answers with the redirect to its result, a failed one shows its message
+    return client.get(r.headers["location"], follow_redirects=False)
 
 
 def test_approve_makes_previews_only_and_links_to_them(web, fake_writer):
@@ -429,7 +433,7 @@ def test_all_previews_failing_keeps_the_item_pending(web, fake_writer):
     _, item_id = queue(app, client)
     fake_writer.fail = True
     r = approve(client, item_id)
-    assert r.status_code == 409
+    assert "Failed" in r.text
     assert "Upwork said no" in r.text
     row = app.state.db.execute("SELECT status FROM approvals WHERE id = ?", (item_id,)).fetchone()
     assert row["status"] == "pending"
@@ -442,7 +446,7 @@ def test_no_copy_no_preview(web, fake_writer):
     _, item_id = queue(app, client)
     app.state.mcp = FakeProfile(RuntimeError("read failed"))
     r = approve(client, item_id)
-    assert r.status_code == 409 and "copy of the current profile" in r.text
+    assert "Failed" in r.text and "copy of the current profile" in r.text
     assert fake_writer.calls == []
     row = app.state.db.execute("SELECT status FROM approvals WHERE id = ?", (item_id,)).fetchone()
     assert row["status"] == "pending"
@@ -453,7 +457,7 @@ def test_kill_switch_blocks_previews(web, monkeypatch):
     _, item_id = queue(app, client)
     app.state.settings.set("general.kill_switch", True)
     r = approve(client, item_id)  # the real writer refuses before it starts claude
-    assert r.status_code == 409 and "kill switch" in r.text.lower()
+    assert "Failed" in r.text and "kill switch" in r.text.lower()
     row = app.state.db.execute("SELECT status FROM approvals WHERE id = ?", (item_id,)).fetchone()
     assert row["status"] == "pending"
 

@@ -503,6 +503,7 @@ def test_claude_cap_is_an_error_not_a_crash(conn, settings, config, fake_claude_
 def web(config, fake_claude_gen):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     s = app.state.settings
     s.set("upwork.talent_org_uid", ORG)
     s.set("metrics.profile_key", MINE)
@@ -518,8 +519,13 @@ def make_item(app, config):
 
 
 def post(client, path, **data):
+    """Click. A queued action is looked at once: a finished one answers with the redirect to its
+    result (as the click did before the worker); a failed one shows its message."""
     token = csrf_from(client.get("/approvals").text)
-    return client.post(path, data={"csrf_token": token, **data})
+    r = client.post(path, data={"csrf_token": token, **data})
+    if r.status_code == 303 and r.headers["location"].startswith("/approvals?action="):
+        return client.get(r.headers["location"])
+    return r
 
 
 def test_approve_saves_the_keywords_and_starts_the_baseline(web, config):
@@ -559,7 +565,7 @@ def test_a_double_approve_decides_once(web, config):
     post(client, f"/approvals/{item_id}/approve")
     app.state.settings.set("keywords.baseline_started", "2020-01-01")
     again = post(client, f"/approvals/{item_id}/approve")
-    assert again.status_code == 409
+    assert "Failed" in again.text and "already decided" in again.text
     assert app.state.settings.get("keywords.baseline_started") == "2020-01-01"
 
 
@@ -567,7 +573,7 @@ def test_a_broken_item_stays_pending(web):
     app, client = web
     item_id = approvals.add(app.state.db, "keywords", "Broken", after={"picks": []})
     r = post(client, f"/approvals/{item_id}/approve")
-    assert r.status_code == 409 and "could not be applied" in r.text
+    assert "Failed" in r.text and "could not be applied" in r.text
     row = app.state.db.execute("SELECT status FROM approvals WHERE id = ?", (item_id,)).fetchone()
     assert row["status"] == "pending"
     assert app.state.settings.get("rank.keywords") == ["old one", "old two"]

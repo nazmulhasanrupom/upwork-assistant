@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -23,8 +24,9 @@ from app import profile_versions as pv
 from app.auth_routes import render
 from app.llm.runner import ClaudeError
 from app.upwork import writes
+from app.upwork.bridge import ClaudeUpworkBridge
 from app.upwork.client import UpworkAuthError, UpworkMCPError
-from app.upwork.routes import bridge_for
+from app.worker import WorkerError, ensure_writes_open, finished_url, known_action
 
 log = logging.getLogger("profile_routes")
 router = APIRouter()
@@ -43,7 +45,11 @@ NOTICES = {
 
 
 def _page(
-    request: Request, status: int = 200, notice: tuple[str, str] | None = None, **q
+    request: Request,
+    status: int = 200,
+    notice: tuple[str, str] | None = None,
+    action_id: str = "",
+    **q,
 ) -> Response:
     s = request.app.state
     rows = pv.list_versions(s.db)
@@ -82,6 +88,7 @@ def _page(
         previews=pv.previews_for_page(s.db, settings=s.settings),
         dry_run=bool(s.settings.get("general.dry_run")),
         notice=notice,
+        action_id=action_id,
         keep=int(s.settings.get("profile_versions.keep")),
     )
 
@@ -96,7 +103,12 @@ def versions_page(
     cf: int = 0,
     bl: int = 0,
     er: int = 0,
+    action: str = "",
 ) -> Response:
+    worker = request.app.state.worker
+    action_id = known_action(worker, action)
+    if url := finished_url(worker, action_id):
+        return RedirectResponse(url, status_code=303)  # done already: go to its result
     notice = NOTICES.get(done)
     if done == "batch":  # numbers only, never text from the query
         parts = [f"{ap} small change(s) approved, previews made"]
@@ -107,30 +119,38 @@ def versions_page(
         if er:
             parts.append(f"{er} problem(s): see Approvals")
         notice = ("warn" if er or bl else "ok", ". ".join(parts) + ".")
-    return _page(request, notice=notice, a=a, b=b)
+    return _page(request, notice=notice, action_id=action_id, a=a, b=b)
 
 
 @router.post("/profile/versions/snapshot")
 def snapshot_now(request: Request) -> Response:
-    s = request.app.state
-    client = None
-    try:
-        client = bridge_for(request)
-        res = pv.snapshot(client, s.db, s.settings, s.config, datetime.now(UTC), reason="manual")
-    except (pv.ProfileVersionError, UpworkAuthError) as e:
-        return _page(request, 400, ("error", str(e)))
-    except (UpworkMCPError, ClaudeError) as e:
-        return _page(request, 502, ("error", f"Could not read the profile: {str(e)[:200]}"))
-    except Exception:
-        log.exception("Profile snapshot failed")
-        return _page(request, 500, ("error", "Could not read the profile. See the log."))
-    finally:
-        if client is not None:
-            try:
-                getattr(client, "close", lambda: None)()
-            except Exception:
-                log.exception("Could not close the Upwork bridge")
-    return RedirectResponse(f"/profile/versions?done={res.note}", status_code=303)
+    # Reading the profile is slow (a Claude call): it runs on the worker (plan W3).
+    config = request.app.state.config
+    factory = getattr(request.app.state, "mcp_factory", None)
+
+    def work(ctx: Any) -> tuple[str, str]:
+        client = None
+        try:
+            client = factory() if factory else ClaudeUpworkBridge(config, ctx.settings, ctx.conn)
+            res = pv.snapshot(
+                client, ctx.conn, ctx.settings, config, datetime.now(UTC), reason="manual"
+            )
+        except (pv.ProfileVersionError, UpworkAuthError) as e:
+            raise WorkerError(str(e)) from e
+        except (UpworkMCPError, ClaudeError) as e:
+            raise WorkerError(f"Could not read the profile: {str(e)[:200]}") from e
+        finally:
+            if client is not None:
+                try:
+                    getattr(client, "close", lambda: None)()
+                except Exception:
+                    log.exception("Could not close the Upwork bridge")
+        return f"/profile/versions?done={res.note}", NOTICES[res.note][1]
+
+    action_id = request.app.state.worker.submit(
+        "profile_snapshot", "profile", "Saving a copy of the profile", work, "profile_snapshot"
+    )
+    return RedirectResponse(f"/profile/versions?action={action_id}", status_code=303)
 
 
 @router.post("/profile/versions/{version_id}/rollback")
@@ -153,25 +173,35 @@ def confirm_preview(request: Request, preview_row_id: int) -> Response:
     except writes.ClickRequired as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
     s = request.app.state
-    try:
-        out = profile_loop.confirm(
-            click,
-            s.db,
-            s.config,
-            s.settings,
-            writes.ClaudeUpworkWriter(s.config, s.settings, s.db),
-            preview_row_id,
-            datetime.now(UTC),
-        )
-    except writes.WriteError as e:
-        return _page(request, 409, ("warn", str(e)[:300]))
-    except Exception:
-        log.exception("Profile confirm failed")
-        return _page(request, 500, ("error", "The confirm failed. See the log."))
-    status = out.confirm.status
-    if status == "dry_run_blocked":
-        return RedirectResponse("/profile/versions?done=dry_run#previews", status_code=303)
-    if status != "confirmed":
-        return _page(request, 502, ("error", out.note))
-    done = "test_started" if out.experiment_id else "confirmed"
-    return RedirectResponse(f"/profile/versions?done={done}#previews", status_code=303)
+    config = s.config
+
+    def work(ctx: Any) -> tuple[str, str]:
+        ensure_writes_open(ctx.settings)  # again, right before the write (the queue can be long)
+        try:
+            out = profile_loop.confirm(
+                click,
+                ctx.conn,
+                config,
+                ctx.settings,
+                writes.ClaudeUpworkWriter(config, ctx.settings, ctx.conn),
+                preview_row_id,
+                datetime.now(UTC),
+            )
+        except writes.WriteError as e:
+            raise WorkerError(str(e)[:300]) from e
+        status = out.confirm.status
+        if status == "dry_run_blocked":
+            return "/profile/versions?done=dry_run#previews", NOTICES["dry_run"][1]
+        if status != "confirmed":
+            raise WorkerError(out.note)
+        done = "test_started" if out.experiment_id else "confirmed"
+        return f"/profile/versions?done={done}#previews", NOTICES[done][1]
+
+    action_id = s.worker.submit(
+        "profile_confirm",
+        str(preview_row_id),
+        "Confirming the profile change",
+        work,
+        f"profile_confirm:{preview_row_id}",
+    )
+    return RedirectResponse(f"/profile/versions?action={action_id}", status_code=303)

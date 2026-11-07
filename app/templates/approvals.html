@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, pill, info, icon, page_header, empty %}
+{% from "_macros.html" import action_status, button, flash, pill, info, icon, page_header, empty %}
 {% set write_kinds = ["profile_change", "profile_rollback", "profile"] %}
 {% set kind_icons = {"keywords": "search", "profile_change": "file-text", "profile_rollback": "history", "profile": "file-text", "playbook_update": "list-todo", "skill_patch": "check-square"} %}
 {% block title %}To do{% endblock %}
@@ -13,6 +13,7 @@
   {% endif %}
 {% endcall %}
 
+{% if action_id %}<div class="action-line" id="approvals-action">{{ action_status(action_id) }}</div>{% endif %}
 {% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
 {% if dry_run %}{{ flash("warn", "Dry-run is on. An approved proposal is blocked at the last step and only logged.") }}{% endif %}
 

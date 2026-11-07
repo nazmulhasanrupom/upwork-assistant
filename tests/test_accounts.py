@@ -86,6 +86,7 @@ def web(config):
     secret = setup_admin(c)
     c.cookies.clear()
     login(c, secret)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     return app, c
 
 
@@ -96,8 +97,12 @@ def use(app, payload):
 
 
 def post(c, path, **data):
+    """Click. A queued action (Test connection) is followed to the page that shows its result."""
     token = csrf_from(c.get("/upwork").text)
-    return c.post(path, data={"csrf_token": token, **data})
+    r = c.post(path, data={"csrf_token": token, **data})
+    if r.status_code == 303 and r.headers["location"].startswith("/upwork?action="):
+        return c.get(r.headers["location"])
+    return r
 
 
 def test_page_has_button_login_help_and_no_oauth(web):
@@ -169,7 +174,7 @@ def test_test_connection_zero_accounts_error(web):
     app, c = web
     use(app, ZERO)
     r = post(c, "/upwork/test")
-    assert r.status_code == 400
+    assert "Failed" in r.text
     assert "No freelancer account found. Agency accounts are not supported." in r.text
 
 
@@ -178,7 +183,7 @@ def test_test_connection_failure_is_shown(web, exc):
     app, c = web
     use(app, exc)
     r = post(c, "/upwork/test")
-    assert r.status_code == 400 and "Test failed" in r.text
+    assert "Failed" in r.text and "Test failed" in r.text
     assert "<b>x</b>" not in r.text and "secret" not in r.text  # escaped / not leaked
 
 
@@ -188,14 +193,14 @@ def test_test_connection_claude_errors_are_shown(web):
     app, c = web
     use(app, ClaudeRateLimited("Claude is rate limited"))
     r = post(c, "/upwork/test")
-    assert r.status_code == 400 and "rate limited" in r.text
+    assert "Failed" in r.text and "rate limited" in r.text
 
 
 def test_test_connection_login_expired(web):
     app, c = web
     use(app, UpworkAuthError("Upwork login in Claude Code is missing or expired."))
     r = post(c, "/upwork/test")
-    assert r.status_code == 400 and "missing or expired" in r.text
+    assert "Failed" in r.text and "missing or expired" in r.text
 
 
 def test_test_and_pick_need_csrf_and_login(web):
@@ -225,7 +230,7 @@ def test_test_connection_when_claude_says_login_needed(web, fake_claude_stream, 
     app, c = web
     monkeypatch.setenv("FAKE_SERVER_STATUS", "needs-auth")
     r = post(c, "/upwork/test")
-    assert r.status_code == 400 and "Upwork login in Claude Code" in r.text
+    assert "Failed" in r.text and "Upwork login in Claude Code" in r.text
 
 
 # ---------- the daily task ----------
@@ -267,3 +272,33 @@ def test_daily_fails_clearly_without_a_single_account(conn, settings, config, pa
 def test_daily_list_accounts_login_expired(conn, settings, config):
     client = daily_client(settings, UpworkAuthError("login expired"))
     assert daily.run_daily(conn, settings, config, client).status == "auth_expired"
+
+
+def test_test_connection_returns_at_once_and_runs_later(web):
+    app, c = web
+    fake = use(app, ONE)
+    app.state.worker.sync = False
+    held = []
+
+    class Held:
+        def submit(self, fn, *args):
+            held.append((fn, args))
+
+    app.state.worker._pool = lambda: Held()
+    token = csrf_from(c.get("/upwork").text)
+    r = c.post("/upwork/test", data={"csrf_token": token})
+    assert r.status_code == 303 and "/upwork?action=" in r.headers["location"]
+    assert fake.calls == [] and "Waiting" in c.get(r.headers["location"]).text
+    again = c.post("/upwork/test", data={"csrf_token": token})
+    assert again.headers["location"] == r.headers["location"] and len(held) == 1
+    held[0][0](*held[0][1])
+    assert fake.calls == [("list_accounts", {})]
+    assert "Sample Freelancer" in c.get(r.headers["location"]).text
+
+
+def test_test_connection_is_stopped_by_the_kill_switch(web):
+    app, c = web
+    fake = use(app, ONE)
+    app.state.settings.set("general.kill_switch", True)
+    r = post(c, "/upwork/test")
+    assert "Stopped by kill switch" in r.text and fake.calls == []

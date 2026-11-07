@@ -437,6 +437,7 @@ def test_scheduler_starts_it_weekly(config, conn, settings, monkeypatch):
 def web(config, fake_claude_gen):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     return app, client
 
 

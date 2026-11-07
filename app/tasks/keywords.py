@@ -12,6 +12,7 @@ import sys
 from app import keywords
 from app.config import load_config
 from app.db import init_db
+from app.llm.live import ClaudeCancelled
 from app.settings import Settings
 from app.tasks.lock import TaskBusy, task_lock
 
@@ -27,6 +28,9 @@ def main() -> int:
         with task_lock(config.data_dir, TASK):  # the button and a second click share this lock
             conn = init_db(config.db_path)
             result = keywords.run_keywords(conn, Settings(conn), config)
+    except ClaudeCancelled:  # the user pressed Cancel: stop cleanly, the lock is released
+        log.warning("%s was cancelled by the user", TASK)
+        return 0
     except TaskBusy:
         log.warning("Keywords task is already running: nothing started")
         return 0

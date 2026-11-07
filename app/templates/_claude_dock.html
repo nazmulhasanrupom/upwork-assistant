@@ -1,0 +1,31 @@
+{# Claude jobs dock (plan L1). Swapped into #claude-dock. Polls by HTMX while Claude works; when
+   nothing runs it is hidden and dock.js looks again now and then. Everything is escaped. #}
+{% from "_macros.html" import info %}
+{% set d = claude_dock() %}
+<div id="claude-dock" class="claude-dock"{% if d.jobs %} hx-get="/claude/dock" hx-trigger="every {{ d.poll }}s" hx-swap="outerHTML"{% else %} data-idle-poll="{{ d.poll }}" hidden{% endif %}>
+{% if d.jobs %}
+  <details data-keep="dock">
+    <summary><span class="dock-dot" aria-hidden="true"></span>Claude: {{ d.jobs|length }} running</summary>
+    <div class="dock-body">
+      <p class="small muted">Live Claude jobs. Open one to see what it is doing. {{ info("live.dock") }}</p>
+      <ul class="dock-list">
+        {% for j in d.jobs %}
+        <li class="dock-job">
+          <div class="dock-row">
+            <details data-keep="{{ j.id }}" class="dock-detail">
+              <summary><span class="dock-label">{{ j.label }}</span> <span class="muted small">{% if j.model %}{{ j.model }} &middot; {% endif %}{{ j.elapsed }}</span></summary>
+              <pre class="dock-log" tabindex="0">{{ j.tail or "Waiting for output..." }}</pre>
+            </details>
+            <form method="post" action="/claude/{{ j.id }}/cancel" hx-post="/claude/{{ j.id }}/cancel" hx-target="#claude-dock" hx-swap="outerHTML"{% if j.is_write %} hx-confirm="This may already be sent to Upwork. Stop it anyway?"{% endif %}>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button class="btn btn-secondary btn-sm" type="submit"{% if j.stopping %} disabled{% endif %}>{{ "Stopping..." if j.stopping else "Cancel" }}</button>
+            </form>
+          </div>
+          {% if j.is_write %}<p class="dock-warn small" role="alert">This may already be sent to Upwork. Check Upwork before you try again.</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </details>
+{% endif %}
+</div>

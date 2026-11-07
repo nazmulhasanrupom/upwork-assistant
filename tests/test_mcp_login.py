@@ -251,6 +251,7 @@ def test_missing_program(env, monkeypatch):
 @pytest.fixture
 def web(config, fake_claude_login):
     app, c = make_client(config)
+    app.state.worker.sync = True  # the click runs the action at once (plan W3)
     secret = setup_admin(c)
     c.cookies.clear()
     login(c, secret)

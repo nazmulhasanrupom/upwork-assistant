@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, card, page_header, growth_tabs %}
+{% from "_macros.html" import action_status, button, flash, card, page_header, growth_tabs %}
 {% block title %}Profile context{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -10,6 +10,7 @@
   </form>
 {% endcall %}
 {{ growth_tabs("/context") }}
+{% if action_id %}<div class="action-line" id="context-action">{{ action_status(action_id) }}</div>{% endif %}
 {% if notice %}{{ flash("ok", notice) }}{% endif %}
 {% if error %}{{ flash("error", error) }}{% endif %}
 {% if counts.over %}{{ flash("warn", "USER.md and MEMORY.md together are " ~ counts.total ~ " characters, over the " ~ counts.cap ~ " character cap. Shorten them so every run stays cheap and focused.") }}{% endif %}

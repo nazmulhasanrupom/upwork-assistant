@@ -11,6 +11,12 @@ PAGE_HEADER_RE = re.compile(r"""page_header\(\s*["'][^"']*["']\s*,\s*["']([\w.\-
 HELP_KEY_RE = re.compile(r"""help_key\s*=\s*["']([\w.\-]+)["']""")
 
 
+def _setting_keys() -> set[str]:
+    from app.settings import load_defaults
+
+    return {f"settings.{k}" for k in load_defaults()}
+
+
 def _used() -> set[str]:
     used: set[str] = set()
     for path in (APP / "templates").glob("*.html"):
@@ -18,7 +24,9 @@ def _used() -> set[str]:
         used |= set(USED_RE.findall(text)) | set(HELP_KEY_RE.findall(text))
         # page_header("Title", "key"), card("Title", help_key...) positional use
         used |= set(PAGE_HEADER_RE.findall(text))
-    return used
+    # settings.<key> help is chosen at run time by the settings page; each must be a real key
+    dynamic = {k for k in KEYS if k.startswith("settings.") and k in _setting_keys()}
+    return used | dynamic
 
 
 def test_used_keys_exist():

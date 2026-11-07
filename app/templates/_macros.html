@@ -127,3 +127,18 @@
   {% for n in range(1, total + 1) %}<li><span class="dot"{% if n == current %} aria-current="step"{% endif %}>{{ n }}</span></li>{% endfor %}
 </ol>
 {%- endmacro %}
+
+{# A background action as a small status. Pass the id that worker.submit returned. While it is
+   queued or running it asks /actions/<id> every few seconds; when done the page reloads. #}
+{% macro action_status(action_id) -%}
+{%- set a = action_row(action_id) -%}
+{%- if not a -%}
+<span class="pill" id="action-{{ action_id }}">Unknown action</span>
+{%- elif a.status in ("queued", "running") -%}
+<span class="action-status" id="action-{{ a.id }}" role="status" hx-get="/actions/{{ a.id }}" hx-trigger="every {{ worker_poll() }}s" hx-swap="outerHTML"><span class="pill warn">{{ "Working" if a.status == "running" else "Waiting" }}</span> <span class="muted small">{{ a.label }}</span> {{ info("worker.status") }}</span>
+{%- elif a.status == "done" -%}
+<span class="action-status" id="action-{{ a.id }}" role="status"><span class="pill ok">Done</span> <span class="small">{{ a.message or a.label }}</span>{% if a.result_url and a.result_url.startswith("/") and not a.result_url.startswith("//") %} <a class="small" href="{{ a.result_url }}">Open</a>{% endif %}</span>
+{%- else -%}
+<span class="action-status" id="action-{{ a.id }}" role="alert"><span class="pill bad">{{ "Stopped" if a.status == "stopped" else "Failed" }}</span> <span class="small">{{ a.error or "Something went wrong." }}</span></span>
+{%- endif -%}
+{%- endmacro %}

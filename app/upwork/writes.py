@@ -40,6 +40,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.config import Config
+from app.llm import live
 from app.llm.prompting import has_em_dash
 from app.llm.runner import (
     ClaudeFailed,
@@ -347,15 +348,21 @@ class ClaudeUpworkWriter:
             click.click_id,
         )
         try:
-            proc = subprocess.run(
+            proc = live.run_process(
                 cmd,
                 cwd=run_dir,
                 env=env,
-                capture_output=True,
-                text=True,
                 timeout=timeout,
-                stdin=subprocess.DEVNULL,
+                conn=self.conn,
+                data_dir=self.config.data_dir,
+                settings=self.settings,
+                kind="write",
+                label=f"Send to Upwork ({tool})",
+                model=model,
             )
+        except live.ClaudeCancelled:
+            self._audit(run_id, model, None)  # keep the record; never retried
+            raise
         except FileNotFoundError as exc:
             self._audit(run_id, model, None)
             raise ClaudeFailed("The `claude` command was not found on PATH.") from exc

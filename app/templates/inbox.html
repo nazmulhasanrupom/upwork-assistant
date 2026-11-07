@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, copy_button, flash, pill, page_header, card, empty, icon %}
+{% from "_macros.html" import action_status, button, copy_button, flash, pill, page_header, card, empty, icon %}
 {% block title %}Inbox{% endblock %}
 {% block content %}
 {% call page_header("Inbox", "inbox.intro") %}
@@ -10,6 +10,7 @@
   <span class="muted small">{% if fetched_at %}Last read {{ fetched_at | dt }}.{% else %}Not read yet.{% endif %}</span>
 {% endcall %}
 
+{% if action_id %}<div class="action-line" id="inbox-action">{{ action_status(action_id) }}</div>{% endif %}
 {% if notice %}{{ flash(notice[0], notice[1] ~ (" Claude cost: $" ~ "%.4f"|format(cost) if cost is not none else "")) }}{% endif %}
 
 <section aria-labelledby="in-invites">

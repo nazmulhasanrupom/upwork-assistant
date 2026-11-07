@@ -86,6 +86,31 @@ def fake_claude_gen(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def fake_claude_chat(tmp_path, monkeypatch):
+    """Fake `claude` for the Chat page (tests/fakes/claude_chat). Helper: replies(list)."""
+    import json
+
+    fake = _install_fake_claude(tmp_path, monkeypatch, "claude_chat")
+    counter = tmp_path / "chat_counter"
+    monkeypatch.setenv("FAKE_CHAT_COUNTER", str(counter))
+
+    def replies(items):
+        path = tmp_path / "chat_replies.json"
+        path.write_text(json.dumps(items))
+        monkeypatch.setenv("FAKE_CHAT_REPLIES", str(path))
+
+    fake.replies = replies
+    fake.count = lambda: int(counter.read_text()) if counter.exists() else 0
+    return fake
+
+
+@pytest.fixture
+def fake_claude_sleep(tmp_path, monkeypatch):
+    """Fake `claude` that sleeps (tests/fakes/claude_sleep): for the live dock and Cancel."""
+    return _install_fake_claude(tmp_path, monkeypatch, "claude_sleep")
+
+
+@pytest.fixture
 def fake_claude_login(tmp_path, monkeypatch):
     """Fake `claude mcp login upwork --no-browser` (needs a pty). The session is killed after."""
     from app.upwork import mcp_login

@@ -40,24 +40,24 @@
 
 <div class="settings-layout">
   <nav class="section-list" aria-label="Settings sections">
-    {% for sec in sections %}<a href="/settings?section={{ sec.name }}#section-{{ sec.name }}"{% if sec.name == current %} aria-current="page"{% endif %}>{{ sec.name }}{% if sec.has_errors %} <span class="dot-bad" aria-label="has errors">!</span>{% endif %}</a>{% endfor %}
+    {% for sec in sections %}<a href="/settings?section={{ sec.name }}#section-{{ sec.name }}"{% if sec.name == current %} aria-current="page"{% endif %}>{{ sec.title }}{% if sec.has_errors %} <span class="dot-bad" aria-label="has errors">!</span>{% endif %}</a>{% endfor %}
   </nav>
   <div class="sections">
 {% for sec in sections %}
 <section class="card settings-section" id="section-{{ sec.name }}"{% if sec.name != current %} hidden{% endif %}>
-  <h2 class="card-title">{{ sec.name }}</h2>
+  <h2 class="card-title">{{ sec.title }}</h2>
   <form method="post" action="/settings/save/{{ sec.name }}" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% for it in sec["items"] %}
     <label class="field{% if it.kind == 'bool' and not it.readonly %} check{% endif %}">
-      <span>{{ it.key }}{% if it.changed %} {{ pill("changed", "info") }}{% endif %}{% if it.readonly %} <span class="hint">(set by the app)</span>{% endif %}</span>
+      <span title="{{ it.key }}">{{ it.label }}{% if it.help_key %}{{ info(it.help_key) }}{% endif %}{% if it.changed %} {{ pill("changed", "info") }}{% endif %}{% if it.readonly %} <span class="hint">(set by the app)</span>{% endif %}</span>
       {% if it.readonly %}
         <code id="ro-{{ it.key }}">{{ it.value or "(empty)" }}</code>
       {% elif it.kind == "bool" %}
         <input type="hidden" name="{{ it.key }}" value="0">
         <input type="checkbox" name="{{ it.key }}" value="1"{% if it.checked %} checked{% endif %}>
       {% elif it.kind == "list" %}
-        <textarea name="{{ it.key }}" rows="3" aria-label="{{ it.key }}">{{ it.value }}</textarea>
+        <textarea name="{{ it.key }}" rows="3" aria-label="{{ it.label }}">{{ it.value }}</textarea>
         <span class="hint">One item per line.</span>
       {% elif it.kind == "number" %}
         <input name="{{ it.key }}" inputmode="decimal" value="{{ it.value }}" required>
@@ -67,7 +67,7 @@
       {% if it.error %}<span class="hint error" role="alert">{{ it.error }}</span>{% endif %}
     </label>
     {% endfor %}
-    {{ button("Save " ~ sec.name, "primary") }}
+    {{ button("Save " ~ sec.title, "primary") }}
   </form>
 </section>
 {% endfor %}

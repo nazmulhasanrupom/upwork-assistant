@@ -9,8 +9,12 @@ from tests.test_auth import PASSWORD, USER, csrf_from, make_client, setup_admin
 
 
 def post(client, path, data=None):
+    """Click. A queued action (the Claude check) is followed to the page that shows its result."""
     token = csrf_from(client.get("/setup").text)
-    return client.post(path, data={**(data or {}), "csrf_token": token})
+    r = client.post(path, data={**(data or {}), "csrf_token": token})
+    if r.status_code == 303 and "/setup?step=claude&action=" in r.headers["location"]:
+        return client.get(r.headers["location"])
+    return r
 
 
 def pay_form(app):
@@ -27,6 +31,7 @@ def schedule_form(app):
 def wiz(config):
     app, client = make_client(config)
     setup_admin(client)  # logged in, on the checklist
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     return app, client
 
 
@@ -127,11 +132,11 @@ def test_setup_needs_login_after_admin(wiz):
 def test_claude_step_ok_and_errors(wiz, fake_claude, monkeypatch):
     app, client = wiz
     r = post(client, "/setup/claude")
-    assert r.status_code == 400 and "NO TOKEN" in r.text
+    assert "Failed" in r.text and "NO TOKEN" in r.text
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-not-real")
     fake_claude.mode("auth")
     r = post(client, "/setup/claude")
-    assert r.status_code == 400 and "BAD TOKEN" in r.text and "tok-not-real" not in r.text
+    assert "Failed" in r.text and "BAD TOKEN" in r.text and "tok-not-real" not in r.text
     fake_claude.mode("ok")
     r = post(client, "/setup/claude")
     assert r.status_code == 200 and "Claude works." in r.text
@@ -208,6 +213,7 @@ def test_wizard_end_to_end_ends_with_dry_run_on(config, fake_claude, monkeypatch
     email skipped, schedule, dry-run, finish."""
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-not-real")
     app, client = make_client(config)
+    app.state.worker.sync = True
     assert client.get("/setup").status_code == 200
     setup_admin(client)
     s = app.state.settings
@@ -230,3 +236,27 @@ def test_wizard_end_to_end_ends_with_dry_run_on(config, fake_claude, monkeypatch
     assert s.get("setup.finished") is True
     assert s.get("general.dry_run") is True
     assert "tok-not-real" not in str(s.all())
+
+
+def test_claude_check_returns_at_once_and_runs_later(wiz, fake_claude, monkeypatch):
+    app, client = wiz
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-not-real")
+    fake_claude.mode("ok")
+    app.state.worker.sync = False
+    held = []
+
+    class Held:
+        def submit(self, fn, *args):
+            held.append((fn, args))
+
+    app.state.worker._pool = lambda: Held()
+    token = csrf_from(client.get("/setup").text)
+    r = client.post("/setup/claude", data={"csrf_token": token})
+    assert r.status_code == 303 and "action=" in r.headers["location"]
+    assert "claude" not in app.state.settings.get("setup.done_steps")
+    assert "Waiting" in client.get(r.headers["location"]).text
+    again = client.post("/setup/claude", data={"csrf_token": token})
+    assert again.headers["location"] == r.headers["location"] and len(held) == 1
+    held[0][0](*held[0][1])
+    assert "claude" in app.state.settings.get("setup.done_steps")
+    assert "Claude works." in client.get(r.headers["location"]).text

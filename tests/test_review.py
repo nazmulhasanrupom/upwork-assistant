@@ -19,6 +19,7 @@ USER_FACTS = "Built 12 n8n flows for small shops.\nRate: 35 per hour."
 def web(config):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     return app, client
 
 
@@ -63,7 +64,10 @@ def rows(app):
 
 def result_page(client, r):
     assert r.status_code == 303, r.text[:300]
+    assert "/review?action=" in r.headers["location"]
     page = client.get(r.headers["location"])
+    assert page.status_code == 303 and page.headers["location"].startswith("/review/")
+    page = client.get(page.headers["location"])
     assert page.status_code == 200
     return page.text
 
@@ -123,7 +127,7 @@ def test_review_flow_with_pasted_job(web, config, with_user_md, fake_claude_gen)
     html = result_page(client, r)
 
     [row] = rows(app)
-    assert r.headers["location"] == f"/review/{row['id']}"
+    assert "/review?action=" in r.headers["location"]
     assert row["job_id"] is None and len(row["job_text_hash"]) == 64
     assert row["score"] == 72 and row["model"] == app.state.settings.get("models.write")
     assert row["cost"] == pytest.approx(0.05) and row["created_at"]
@@ -315,6 +319,7 @@ def test_history_lists_past_reviews(web, with_user_md, fake_claude_gen):
     result_page(client, post_review(client, job_id="42"))
     result_page(client, post_review(client, job_id="42"))
     html = client.get("/review").text
+    html = html[html.index('id="review-history"') :]  # the top bar also links finished actions
     assert 'href="/review/1"' in html and 'href="/review/2"' in html
     assert html.index('href="/review/2"') < html.index('href="/review/1"')  # newest first
     assert "CRM job" in html and 'class="score-badge ok">72' in html
@@ -399,3 +404,52 @@ def test_review_prompt_carries_skill_summaries_and_the_matching_skill(
     assert "# Skill for this task: review-proposal" in prompt
     assert "Check each claim against the facts" in prompt
     assert "Draft a profile change" not in prompt  # other skills: summary only
+
+
+# ---------------------------------------------------------------- the worker (plan W3)
+
+
+def test_review_returns_at_once_and_runs_on_the_worker(web, with_user_md, fake_claude_gen):
+    app, client = web
+    app.state.worker.sync = False
+    held = []
+
+    class Held:
+        def submit(self, fn, *args):
+            held.append((fn, args))
+
+    app.state.worker._pool = lambda: Held()
+    r = post_review(client)
+    assert r.status_code == 303 and "/review?action=" in r.headers["location"]
+    assert rows(app) == [] and not fake_claude_gen.called()  # nothing ran yet
+    assert "Waiting" in client.get(r.headers["location"]).text
+    # the same review clicked again shares the queued action
+    r2 = post_review(client)
+    assert r2.headers["location"] == r.headers["location"] and len(held) == 1
+    fn, args = held[0]
+    fn(*args)
+    [row] = rows(app)
+    done = client.get(r.headers["location"])
+    assert done.status_code == 303 and done.headers["location"] == f"/review/{row['id']}"
+
+
+def test_review_failure_is_shown_on_the_form(web, with_user_md, monkeypatch):
+    app, client = web
+
+    def boom(*a, **kw):
+        raise RuntimeError("secret detail")
+
+    monkeypatch.setattr(service, "run_review", boom)
+    r = post_review(client)
+    page = client.get(r.headers["location"])
+    assert page.status_code == 200 and "The review failed. See the log." in page.text
+    assert "secret detail" not in page.text
+
+
+def test_review_is_stopped_by_the_kill_switch(web, with_user_md, fake_claude_gen):
+    app, client = web
+    app.state.settings.set("general.kill_switch", True)
+    r = post_review(client)
+    page = client.get(r.headers["location"])
+    assert "Stopped by kill switch" in page.text
+    assert rows(app) == [] and not fake_claude_gen.called()

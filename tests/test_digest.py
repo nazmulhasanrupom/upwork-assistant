@@ -222,11 +222,13 @@ def test_next_day_sends_again(conn, settings, config, smtp):  # noqa: F811
     set_smtp(settings)
     fill(conn, settings, config)
     now = datetime.now(UTC)
+    # Pin every job to `now` and to `now + 1 day` so a clock near local midnight cannot move
+    # a job out of the digest day (no extra minutes, no real-time gap between the runs).
+    conn.execute("UPDATE jobs SET first_seen = ?", (now.isoformat(timespec="seconds"),))
     digest.run_digest(conn, settings, config, now=now)
-    conn.execute(
-        "UPDATE jobs SET first_seen = ?", ((now + timedelta(days=1)).isoformat(timespec="seconds"),)
-    )
-    res = digest.run_digest(conn, settings, config, now=now + timedelta(days=1, minutes=1))
+    later = now + timedelta(days=1)
+    conn.execute("UPDATE jobs SET first_seen = ?", (later.isoformat(timespec="seconds"),))
+    res = digest.run_digest(conn, settings, config, now=later)
     assert res.status == "ok" and len(smtp.instances) == 2
 
 

@@ -22,6 +22,7 @@ from app import profile_versions as pv
 from app.config import Config, load_config
 from app.db import init_db
 from app.llm import prompting
+from app.llm.live import ClaudeCancelled
 from app.llm.runner import BudgetCapReached, ClaudeFailed, ClaudeRateLimited, run_claude
 from app.settings import Settings
 from app.tasks.lock import TaskBusy, task_lock
@@ -198,6 +199,9 @@ def main() -> int:
         with task_lock(config.data_dir, TASK):  # the button and the scheduler share this lock
             conn = init_db(config.db_path)
             result = run_monthly(conn, Settings(conn), config)
+    except ClaudeCancelled:  # the user pressed Cancel: stop cleanly, the lock is released
+        log.warning("%s was cancelled by the user", TASK)
+        return 0
     except TaskBusy:
         log.warning("monthly is already running: nothing started")
         return 0

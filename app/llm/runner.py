@@ -19,6 +19,8 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import Config
+from app.llm import live
+from app.llm.live import ClaudeCancelled  # noqa: F401 - re-exported
 from app.settings import Settings
 
 log = logging.getLogger("claude")
@@ -308,14 +310,19 @@ def run_claude(
     cmd = build_command(prompt, model, max_turns, max_budget_usd, effort, tools)
     log.info("claude call: task=%s model=%s run=%s", task, model, run_id)
     try:
-        proc = subprocess.run(
+        proc = live.run_process(
             cmd,
             cwd=run_dir,
             env=claude_env(config),
-            capture_output=True,
-            text=True,
             timeout=timeout,
-            stdin=subprocess.DEVNULL,
+            conn=conn,
+            data_dir=config.data_dir,
+            settings=settings,
+            kind="claude",
+            label=task,
+            model=model,
+            run_id=record_run_id,
+            stream=True,
         )
     except FileNotFoundError as exc:
         raise ClaudeFailed("The `claude` command was not found on PATH.") from exc

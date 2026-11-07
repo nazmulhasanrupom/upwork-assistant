@@ -36,6 +36,7 @@ from app.gmail import Gmail
 from app.memory import memory_file, read_file
 from app.tools import claude_check
 from app.upwork import accounts
+from app.worker import WorkerError, known_action
 
 log = logging.getLogger("setup")
 
@@ -99,7 +100,10 @@ def done_keys(request: Request) -> set[str]:
 
 
 def mark_done(request: Request, key: str) -> None:
-    settings = request.app.state.settings
+    mark_done_in(request.app.state.settings, key)
+
+
+def mark_done_in(settings: Any, key: str) -> None:
     done = [str(k) for k in settings.get("setup.done_steps")]
     if key not in done:
         settings.set("setup.done_steps", [*done, key])
@@ -125,6 +129,7 @@ def _hub(request: Request, status: int = 200, **ctx: Any) -> Response:
     st = s.settings
     ctx.setdefault("notice", "")
     ctx.setdefault("error", "")
+    ctx.setdefault("action_id", "")
     return render(
         request,
         "setup.html",
@@ -150,12 +155,12 @@ def _admin_page(request: Request, status: int = 200, error: str = "") -> Respons
 
 
 @router.get("/setup")
-def setup_home(request: Request) -> Response:
+def setup_home(request: Request, action: str = "") -> Response:
     if not auth.admin_exists(request.app.state.db):
         return _admin_page(request)
     if auth.current_user(request) is None:
         return _redirect("/login")
-    return _hub(request)
+    return _hub(request, action_id=known_action(request.app.state.worker, action))
 
 
 @router.get("/setup/admin")
@@ -271,11 +276,20 @@ def setup_claude(request: Request) -> Response:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = config.claude_code_oauth_token
     if config.anthropic_api_key:
         env["ANTHROPIC_API_KEY"] = config.anthropic_api_key
-    ok, message = claude_check.check(env)  # the message never holds the token
-    if ok:
-        mark_done(request, "claude")
-        return _hub(request, notice="Claude works.")
-    return _hub(request, 400, error=message)
+
+    def work(ctx: Any) -> tuple[str, str]:
+        # the message never holds the token
+        ok, message = claude_check.check(env, conn=ctx.conn, data_dir=config.data_dir)
+        if not ok:
+            raise WorkerError(message)
+        mark_done_in(ctx.settings, "claude")
+        return f"/setup?step=claude&action={ctx.action_id}", "Claude works."
+
+    # The check starts Claude, which is slow: it runs on the worker (plan W3).
+    action_id = request.app.state.worker.submit(
+        "setup_claude", "claude", "Checking Claude", work, "setup_claude"
+    )
+    return _redirect(f"/setup?step=claude&action={action_id}")
 
 
 # ---------- steps 5, 6, 9: forms that save settings ----------

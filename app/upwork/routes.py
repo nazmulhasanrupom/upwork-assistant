@@ -20,13 +20,14 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 
 from app.auth_routes import render
 from app.llm.runner import ClaudeError, claude_config_dir, claude_env
 from app.upwork import accounts, login_import, mcp_login
 from app.upwork.bridge import ClaudeUpworkBridge, last_fetch
 from app.upwork.client import UpworkAuthError, UpworkMCPError
+from app.worker import WorkerError, known_action
 
 log = logging.getLogger("upwork.routes")
 
@@ -64,17 +65,21 @@ def record_test(settings, status: str, message: str) -> None:
 
 def test_connection(request: Request) -> tuple[str, str]:
     """Run one list_accounts batch and save the result. Returns (notice, error); never raises."""
-    notice, error, status = _run_test(request)
-    record_test(request.app.state.settings, status, notice or error)
+    s = request.app.state
+    return run_connection_test(s.config, s.settings, s.db, getattr(s, "mcp_factory", None))
+
+
+def run_connection_test(config, settings, conn, factory=None) -> tuple[str, str]:
+    notice, error, status = _run_test(config, settings, conn, factory)
+    record_test(settings, status, notice or error)
     return notice, error
 
 
-def _run_test(request: Request) -> tuple[str, str, str]:
-    s = request.app.state
+def _run_test(config, settings, conn, factory=None) -> tuple[str, str, str]:
     client = None
     try:
-        client = bridge_for(request)
-        res = accounts.detect_and_save(client, s.settings)
+        client = factory() if factory else ClaudeUpworkBridge(config, settings, conn)
+        res = accounts.detect_and_save(client, settings)
     except UpworkAuthError as e:
         return "", str(e)[:MAX_SHOWN], "needs_login"
     except (UpworkMCPError, ClaudeError, accounts.AccountError) as e:
@@ -96,6 +101,7 @@ def _run_test(request: Request) -> tuple[str, str, str]:
 def _page(request: Request, status_code: int = 200, **ctx) -> Response:
     s = request.app.state
     ctx.setdefault("login_failed", False)
+    ctx.setdefault("action_id", "")
     return render(
         request,
         "upwork.html",
@@ -118,14 +124,28 @@ def _page(request: Request, status_code: int = 200, **ctx) -> Response:
 
 
 @router.get("/upwork")
-def upwork_page(request: Request):
-    return _page(request, notice="", error="")
+def upwork_page(request: Request, action: str = ""):
+    return _page(
+        request, notice="", error="", action_id=known_action(request.app.state.worker, action)
+    )
 
 
 @router.post("/upwork/test")
 def test_post(request: Request):
-    notice, error = test_connection(request)
-    return _page(request, 400 if error else 200, notice=notice, error=error, tested=not error)
+    """Test connection starts Claude, which is slow: it runs on the worker (plan W3)."""
+    s = request.app.state
+    config, factory = s.config, getattr(s, "mcp_factory", None)
+
+    def work(ctx) -> tuple[str, str]:
+        notice, error = run_connection_test(config, ctx.settings, ctx.conn, factory)
+        if error:
+            raise WorkerError(error)
+        return f"/upwork?action={ctx.action_id}", notice
+
+    action_id = s.worker.submit(
+        "upwork_test", "upwork", "Testing the connection", work, "upwork_test"
+    )
+    return RedirectResponse(f"/upwork?action={action_id}", status_code=303)
 
 
 @router.post("/upwork/account")

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
@@ -20,6 +21,7 @@ from fastapi.responses import RedirectResponse, Response
 from app import mail
 from app.auth_routes import render
 from app.gmail import Gmail, GmailError
+from app.worker import WorkerError, known_action
 
 log = logging.getLogger("gmail.routes")
 
@@ -66,13 +68,14 @@ def _page(request: Request, status_code: int = 200, **ctx) -> Response:
         steps=SETUP_STEPS,
         notice=ctx.pop("notice", ""),
         error=ctx.pop("error", ""),
+        action_id=ctx.pop("action_id", ""),
         **ctx,
     )
 
 
 @router.get("/settings/email")
-def email_page(request: Request):
-    return _page(request)
+def email_page(request: Request, action: str = ""):
+    return _page(request, action_id=known_action(request.app.state.worker, action))
 
 
 @router.post("/settings/email")
@@ -161,11 +164,19 @@ def send_test(request: Request):
         ["This is a test from Upwork Assistant.", "If you can read this, email works."],
         base_url=s.config.public_base_url,
     )
-    try:
-        g.send(to, "Test email from Upwork Assistant", text, html)
-    except GmailError as e:
-        return _page(request, 400, error=f"Test email failed: {e}")
-    return _page(request, notice=f"Test email sent to {to}.")
+    config = s.config
+
+    def work(ctx: Any) -> tuple[str, str]:
+        try:
+            Gmail(config, ctx.settings, ctx.conn).send(
+                to, "Test email from Upwork Assistant", text, html
+            )
+        except GmailError as e:
+            raise WorkerError(f"Test email failed: {e}") from e
+        return f"/settings/email?action={ctx.action_id}", f"Test email sent to {to}."
+
+    action_id = s.worker.submit("email_test", "gmail", "Sending a test email", work, "email_test")
+    return RedirectResponse(f"/settings/email?action={action_id}", status_code=303)
 
 
 @router.post("/settings/email/disconnect")

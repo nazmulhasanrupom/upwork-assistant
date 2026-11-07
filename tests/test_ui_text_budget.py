@@ -19,9 +19,27 @@ EXEMPT_CLASSES = {"notice", "warning", "empty", "empty-state", "flash"}
 VOID = {"br", "hr", "img", "input", "meta", "link", "use", "path", "circle", "line", "rect"}
 
 # Add a path here when a page is redesigned. Each page is fetched after `seed` ran.
-PAGES = ["/", "/approvals", "/jobs", "/jobs/9000000000000000001", "/review",
-         "/inbox", "/context", "/profile/versions", "/playbook", "/trends", "/reports", "/learning",
-         "/settings", "/settings/email", "/upwork", "/runs", "/setup", "/setup?step=finish"]
+PAGES = [
+    "/",
+    "/approvals",
+    "/jobs",
+    "/jobs/9000000000000000001",
+    "/review",
+    "/inbox",
+    "/chat",
+    "/context",
+    "/profile/versions",
+    "/playbook",
+    "/trends",
+    "/reports",
+    "/learning",
+    "/settings",
+    "/settings/email",
+    "/upwork",
+    "/runs",
+    "/setup",
+    "/setup?step=finish",
+]
 PAGES += [f"/setup?step={key}" for key in STEP_KEYS]
 
 
@@ -151,8 +169,10 @@ def test_login_page_has_no_long_paragraphs(config):
     r = client.get("/login")
     assert r.status_code == 200 and 'name="code"' in r.text and 'name="username"' in r.text
     assert long_paragraphs(r.text) == []
-    bad = client.post("/login", data={"username": "x", "password": "y", "code": "1",
-                                       "csrf_token": csrf_from(r.text)})
+    bad = client.post(
+        "/login",
+        data={"username": "x", "password": "y", "code": "1", "csrf_token": csrf_from(r.text)},
+    )
     assert bad.status_code == 401 and "Wrong user name" in bad.text
     assert long_paragraphs(bad.text) == []
 
@@ -162,9 +182,16 @@ def test_setup_admin_and_totp_have_no_long_paragraphs(config):
     r = client.get("/setup")
     assert r.status_code == 200 and "step 1 of 10" in r.text and long_paragraphs(r.text) == []
     token = csrf_from(r.text)
-    client.post("/setup/account", data={"username": "u", "password": "a-long-password-12",
-                                        "password2": "a-long-password-12",
-                                        "setup_code": client.setup_code, "csrf_token": token})
+    client.post(
+        "/setup/account",
+        data={
+            "username": "u",
+            "password": "a-long-password-12",
+            "password2": "a-long-password-12",
+            "setup_code": client.setup_code,
+            "csrf_token": token,
+        },
+    )
     r = client.get("/setup/totp")
     assert r.status_code == 200 and long_paragraphs(r.text) == []
 

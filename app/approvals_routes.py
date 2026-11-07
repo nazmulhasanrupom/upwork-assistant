@@ -15,6 +15,7 @@ they take a `writes.issue_click` first, so a page load can never decide anything
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -24,7 +25,8 @@ from app import profile_versions as pv
 from app.auth_routes import render
 from app.tasks import lock, trigger
 from app.upwork import writes
-from app.upwork.routes import bridge_for
+from app.upwork.bridge import ClaudeUpworkBridge
+from app.worker import WorkerError, ensure_writes_open, finished_url, known_action
 
 router = APIRouter()
 
@@ -82,6 +84,7 @@ def _page(
     status: int = 200,
     notice: tuple[str, str] | None = None,
     kind: str = "",
+    action_id: str = "",
 ) -> Response:
     s = request.app.state
     approvals.expire_old(s.db, s.settings)
@@ -98,6 +101,7 @@ def _page(
         decided=approvals.recent_decided(s.db),
         dry_run=bool(s.settings.get("general.dry_run")),
         notice=notice,
+        action_id=action_id,
         kw=_keywords_panel(request),
         small=profile_loop.small_items(s.db, s.settings),
         small_max_words=int(s.settings.get("profile_loop.small_change_max_words")),
@@ -115,25 +119,63 @@ def _page(
 
 
 @router.get("/approvals")
-def approvals_page(request: Request, done: str = "", kind: str = "") -> Response:
+def approvals_page(request: Request, done: str = "", kind: str = "", action: str = "") -> Response:
     # only fixed texts, never the query itself
-    return _page(request, notice=NOTICES.get(done), kind=kind[:40])
+    worker = request.app.state.worker
+    action_id = known_action(worker, action)
+    if url := finished_url(worker, action_id):
+        return RedirectResponse(url, status_code=303)  # done already: go to its result
+    return _page(request, notice=NOTICES.get(done), kind=kind[:40], action_id=action_id)
 
 
-def _context(request: Request, *, confirm: bool = False) -> dict:
-    """What a handler may need (profile roll back or change); each preview gets its own click.
-    Only the batch button adds `confirm_click`."""
+class ClickBank:
+    """Clicks made in the POST route, handed out one by one to the work function. The worker
+    never makes a click: a click is only ever issued from the user's own POST (`issue_click`)."""
+
+    def __init__(self, request: Request, action: str, count: int):
+        self._clicks = [writes.issue_click(request, action) for _ in range(count)]
+        self._action = action
+
+    def take(self) -> writes.UserClick:
+        if not self._clicks:
+            raise writes.ClickRequired("The click ran out. Click again.")
+        return self._clicks.pop()
+
+
+def _context(request: Request, *, confirm: bool = False, count: int = 0) -> dict:
+    """What a handler may need (profile roll back or change); each preview gets its own click,
+    made here in the route (a bank of `count` items' worth of clicks, none for an item that
+    makes no Upwork preview). Only the batch button adds `confirm_click`.
+    The reader and writer are built inside the work function."""
     s = request.app.state
+    per = int(s.settings.get("worker.clicks_per_item"))
+    previews = ClickBank(request, "preview", count * per)
     ctx = {
-        "issue_click": lambda: writes.issue_click(request, "preview"),
+        "issue_click": previews.take,
         "settings": s.settings,
         "config": s.config,
-        "reader": lambda: bridge_for(request),
-        "writer": lambda: writes.ClaudeUpworkWriter(s.config, s.settings, s.db),
+        "factory": getattr(s, "mcp_factory", None),
     }
     if confirm:
-        ctx["confirm_click"] = lambda: writes.issue_click(request, "confirm")
+        ctx["confirms"] = ClickBank(request, "confirm", count * per)
     return ctx
+
+
+def _work_context(base: dict, ctx: Any) -> dict:
+    """The handler context for the worker thread: its own settings and database connection."""
+    config, factory = base["config"], base["factory"]
+    out = {
+        "issue_click": base["issue_click"],
+        "settings": ctx.settings,
+        "config": config,
+        "reader": lambda: (
+            factory() if factory else ClaudeUpworkBridge(config, ctx.settings, ctx.conn)
+        ),
+        "writer": lambda: writes.ClaudeUpworkWriter(config, ctx.settings, ctx.conn),
+    }
+    if "confirms" in base:
+        out["confirm_click"] = base["confirms"].take
+    return out
 
 
 def _decide(request: Request, item_id: int, decision: str) -> Response:
@@ -142,14 +184,40 @@ def _decide(request: Request, item_id: int, decision: str) -> Response:
     except writes.ClickRequired as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
     s = request.app.state
-    context = _context(request)
+    if decision == "approved":
+        return _approve_in_worker(request, item_id)
     try:
-        row = approvals.decide(s.db, item_id, decision, datetime.now(UTC), context)
+        approvals.decide(s.db, item_id, decision, datetime.now(UTC), _context(request))
     except approvals.ApprovalError as e:
         return _page(request, 409, ("warn", str(e)))
-    if row["kind"] in (pv.KIND, profile_loop.KIND) and decision == "approved":
-        return RedirectResponse("/profile/versions?done=previewed#previews", status_code=303)
     return RedirectResponse(f"/approvals?done={decision}", status_code=303)
+
+
+def _approve_in_worker(request: Request, item_id: int) -> Response:
+    """Approving can make Upwork previews (profile items): that is slow, so it runs on the worker
+    (plan W3). The clicks are made here; the kill switch is read again right before the write."""
+    s = request.app.state
+    found = s.db.execute("SELECT kind FROM approvals WHERE id = ?", (item_id,)).fetchone()
+    writes_previews = found is not None and found["kind"] in (pv.KIND, profile_loop.KIND)
+    base = _context(request, count=1 if writes_previews else 0)
+
+    def work(ctx: Any) -> tuple[str, str]:
+        if writes_previews:
+            ensure_writes_open(ctx.settings)
+        try:
+            row = approvals.decide(
+                ctx.conn, item_id, "approved", datetime.now(UTC), _work_context(base, ctx)
+            )
+        except approvals.ApprovalError as e:
+            raise WorkerError(str(e)) from e
+        if row["kind"] in (pv.KIND, profile_loop.KIND):
+            return "/profile/versions?done=previewed#previews", NOTICES["approved"][1]
+        return "/approvals?done=approved", NOTICES["approved"][1]
+
+    action_id = s.worker.submit(
+        "approval_approve", str(item_id), "Approving", work, f"approve:{item_id}"
+    )
+    return RedirectResponse(f"/approvals?action={action_id}", status_code=303)
 
 
 @router.post("/approvals/{item_id:int}/approve")
@@ -189,16 +257,26 @@ def approve_small(request: Request) -> Response:
     except writes.ClickRequired as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
     s = request.app.state
-    if not profile_loop.small_items(s.db, s.settings):
+    small = profile_loop.small_items(s.db, s.settings)
+    if not small:
         return RedirectResponse("/approvals?done=batch_none", status_code=303)
-    res = profile_loop.approve_small(
-        s.db, s.settings, s.config, _context(request, confirm=True), datetime.now(UTC)
+    base = _context(request, confirm=True, count=len(small))
+
+    def work(ctx: Any) -> tuple[str, str]:
+        ensure_writes_open(ctx.settings)  # again, right before the writes
+        res = profile_loop.approve_small(
+            ctx.conn, ctx.settings, base["config"], _work_context(base, ctx),
+            datetime.now(UTC),
+        )  # fmt: skip
+        if not res.approved:
+            raise WorkerError((res.errors[0] if res.errors else "Nothing was approved.")[:300])
+        q = f"done=batch&ap={res.approved}&cf={res.confirmed}&bl={res.blocked}&er={len(res.errors)}"
+        return f"/profile/versions?{q}#previews", "Small changes approved."
+
+    action_id = s.worker.submit(
+        "approval_small", "small", "Approving small changes", work, "approve:small"
     )
-    if not res.approved:
-        msg = res.errors[0] if res.errors else "Nothing was approved."
-        return _page(request, 409, ("warn", msg[:300]))
-    q = f"done=batch&ap={res.approved}&cf={res.confirmed}&bl={res.blocked}&er={len(res.errors)}"
-    return RedirectResponse(f"/profile/versions?{q}#previews", status_code=303)
+    return RedirectResponse(f"/approvals?action={action_id}", status_code=303)
 
 
 @router.post("/approvals/profile-test/run")

@@ -1,0 +1,21 @@
+{# Top bar part for background actions. Swapped into #actions-bar. It polls only while something
+   works, so the page is quiet otherwise. Finished actions show once as a notice (notice.js). #}
+{% from "_macros.html" import info %}
+{% set s = actions_summary() %}
+{% if s.working %}
+<span hidden hx-get="/actions" hx-trigger="every {{ s.poll }}s" hx-target="#actions-bar" hx-swap="innerHTML"></span>
+<details class="gear actions">
+  <summary class="pill warn" aria-label="Working, {{ s.count }} running">Working ({{ s.count }})</summary>
+  <div class="gear-menu actions-menu">
+    <p class="small muted">Running in the background {{ info("worker.working") }}</p>
+    <ul class="actions-list">
+      {% for a in s.working %}
+      <li><span class="pill{% if a.status == 'running' %} warn{% endif %}">{{ 'Running' if a.status == 'running' else 'Waiting' }}</span> {{ a.label }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+</details>
+{% endif %}
+{% for a in s.recent %}
+<div class="notice flash {{ 'ok' if a.status == 'done' else 'error' }}" data-notice data-toast-id="{{ a.id }}" role="{{ 'status' if a.status == 'done' else 'alert' }}"><strong class="flash-label">{{ 'Done' if a.status == 'done' else 'Stopped' if a.status == 'stopped' else 'Failed' }}</strong> <span class="flash-text">{{ a.label }}{% set t = a.message if a.status == 'done' else a.error %}{% if t %}: {{ t }}{% endif %}{% if a.status == 'done' and a.result_url and a.result_url.startswith('/') and not a.result_url.startswith('//') %} <a href="{{ a.result_url }}">Open</a>{% endif %}</span></div>
+{% endfor %}

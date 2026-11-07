@@ -28,6 +28,8 @@ from fastapi.responses import RedirectResponse, Response
 
 from app import auth, crypto
 from app.auth_routes import render
+from app.help import load_help
+from app.settings_labels import key_label, section_title
 
 log = logging.getLogger("settings_page")
 router = APIRouter()
@@ -168,11 +170,19 @@ def _sections(request: Request, form: dict[str, str] | None = None, errors=None)
         )
         shown = form[key] if form and key in form else input_text(current[key])
         sec = out.setdefault(
-            section_of(key), {"name": section_of(key), "items": [], "has_errors": False}
+            section_of(key),
+            {
+                "name": section_of(key),
+                "title": section_title(section_of(key)),
+                "items": [],
+                "has_errors": False,
+            },
         )
         sec["items"].append(
             {
                 "key": key,
+                "label": key_label(key),
+                "help_key": f"settings.{key}" if f"settings.{key}" in load_help() else "",
                 "kind": kind,
                 "value": shown,
                 "checked": shown == "1",

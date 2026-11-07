@@ -16,12 +16,18 @@ from tests.test_auth import make_client as make_web_client
 def web(config):
     app, client = make_web_client(config)
     setup_admin(client)
+    app.state.worker.sync = True  # each action runs inside the click (plan W3)
     return app, client
 
 
 def post(client, path, **data):
+    """Click. A queued action is looked at once: a finished one answers with the redirect to its
+    result (as the click did before the worker); a failed one shows its message."""
     token = csrf_from(client.get("/approvals").text)
-    return client.post(path, data={"csrf_token": token, **data})
+    r = client.post(path, data={"csrf_token": token, **data})
+    if r.status_code == 303 and r.headers["location"].startswith("/approvals?action="):
+        return client.get(r.headers["location"])
+    return r
 
 
 def iso(minutes_ago=0, days_ago=0):
@@ -135,7 +141,7 @@ def test_proposal_cannot_be_decided_here(web, monkeypatch):
     monkeypatch.setattr(writes, "confirm_preview", lambda *a, **k: pytest.fail("confirmed"))
     # a proposal has no row in `approvals`: the generic route knows nothing about it
     r = post(client, f"/approvals/{pid}/approve")
-    assert r.status_code == 409 and "does not exist" in r.text
+    assert "does not exist" in r.text and "Failed" in r.text
     assert conn.execute("SELECT status FROM previews WHERE id=?", (pid,)).fetchone()[0] == (
         "previewed"
     )
@@ -274,7 +280,7 @@ def test_second_decision_is_refused(web):
 def test_unknown_item(web):
     _, client = web
     r = post(client, "/approvals/999/approve")
-    assert r.status_code == 409 and "does not exist" in r.text
+    assert "does not exist" in r.text and "Failed" in r.text
 
 
 def test_registry_is_empty_and_unknown_kind_records_only(web):
@@ -305,7 +311,7 @@ def test_failing_handler_keeps_item_pending(web):
     approvals.register("keywords", bad)
     item = approvals.add(app.state.db, "keywords", "Add keyword")
     r = post(client, f"/approvals/{item}/approve")
-    assert r.status_code == 409 and "could not be applied" in r.text
+    assert "could not be applied" in r.text and "Failed" in r.text
     got = row(app.state.db, item)
     assert got["status"] == "pending" and got["decided_at"] is None
 
@@ -321,7 +327,7 @@ def test_old_items_expire(web):
     r = client.get("/approvals")
     assert "New one" in r.text and row(conn, old)["status"] == "expired"
     assert row(conn, new)["status"] == "pending"
-    assert post(client, f"/approvals/{old}/approve").status_code == 409
+    assert "Failed" in post(client, f"/approvals/{old}/approve").text
 
 
 def test_before_after_json_stored(web):
@@ -331,3 +337,76 @@ def test_before_after_json_stored(web):
     assert json.loads(got["before_json"]) == {"a": 1} and json.loads(got["after_json"]) == ["x"]
     with pytest.raises(sqlite3.IntegrityError):  # status is checked by the table
         app.state.db.execute("UPDATE approvals SET status='weird' WHERE id=?", (item,))
+
+
+# ---------- the worker (plan W3) ----------
+
+
+class HeldPool:
+    """Stands in for the thread pool: keeps the work so the test can run it later."""
+
+    def __init__(self):
+        self.jobs = []
+
+    def submit(self, fn, *args):
+        self.jobs.append((fn, args))
+
+    def run_all(self):
+        jobs, self.jobs = self.jobs, []
+        for fn, args in jobs:
+            fn(*args)
+
+
+def hold(app):
+    pool = HeldPool()
+    app.state.worker.sync = False
+    app.state.worker._pool = lambda: pool
+    return pool
+
+
+def test_approve_returns_at_once_and_dedups(web):
+    app, client = web
+    item = approvals.add(app.state.db, "keywords", "Add keyword")
+    pool = hold(app)
+    token = csrf_from(client.get("/approvals").text)
+    r = client.post(f"/approvals/{item}/approve", data={"csrf_token": token})
+    assert r.status_code == 303 and "/approvals?action=" in r.headers["location"]
+    assert row(app.state.db, item)["status"] == "pending"  # not decided yet
+    page = client.get(r.headers["location"])
+    assert page.status_code == 200 and "Waiting" in page.text
+    again = client.post(f"/approvals/{item}/approve", data={"csrf_token": token})
+    assert again.headers["location"] == r.headers["location"] and len(pool.jobs) == 1
+    pool.run_all()
+    assert row(app.state.db, item)["status"] == "approved"
+    done = client.get(r.headers["location"])
+    assert done.status_code == 303 and done.headers["location"] == "/approvals?done=approved"
+
+
+def test_approve_is_stopped_by_the_kill_switch(web):
+    app, client = web
+    item = approvals.add(app.state.db, "keywords", "Add keyword")
+    hold(app)
+    token = csrf_from(client.get("/approvals").text)
+    r = client.post(f"/approvals/{item}/approve", data={"csrf_token": token})
+    app.state.settings.set("general.kill_switch", True)  # flipped while the action waits
+    app.state.worker._pool().run_all()
+    page = client.get(r.headers["location"])
+    assert "Stopped by kill switch" in page.text
+    assert row(app.state.db, item)["status"] == "pending"
+
+
+def test_profile_approve_checks_the_kill_switch_again_before_any_preview(web, monkeypatch):
+    from app import profile_versions as pv
+
+    app, client = web
+    item = approvals.add(
+        app.state.db, pv.KIND, "Roll back", before={"title": "a"}, after={"title": "b"}
+    )
+    monkeypatch.setattr(writes, "preview_profile_update", lambda *a, **k: pytest.fail("preview"))
+    hold(app)
+    token = csrf_from(client.get("/approvals").text)
+    r = client.post(f"/approvals/{item}/approve", data={"csrf_token": token})
+    app.state.settings.set("general.kill_switch", True)
+    app.state.worker._pool().run_all()
+    assert "kill switch" in client.get(r.headers["location"]).text.lower()
+    assert row(app.state.db, item)["status"] == "pending"

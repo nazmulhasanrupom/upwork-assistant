@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import button, flash, pill, page_header, empty, growth_tabs, card %}
+{% from "_macros.html" import action_status, button, flash, pill, page_header, empty, growth_tabs, card %}
 {% block title %}Profile history{% endblock %}
 {% block content %}
 {% call page_header("History", "history.intro") %}
@@ -11,6 +11,7 @@
 {{ growth_tabs("/profile/versions") }}
 <p class="muted small" id="pv-safety">Roll back asks for your approval first and never changes Upwork by itself.{% if dry_run %} Dry-run is on.{% endif %}</p>
 
+{% if action_id %}<div class="action-line" id="pv-action">{{ action_status(action_id) }}</div>{% endif %}
 {% if notice %}{{ flash(notice[0], notice[1]) }}{% endif %}
 
 <section aria-labelledby="pv-versions">
